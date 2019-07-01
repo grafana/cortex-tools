@@ -26,7 +26,6 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -72,7 +71,7 @@ func (s AlertState) String() string {
 	case StateFiring:
 		return "firing"
 	}
-	panic(errors.Errorf("unknown alert state: %s", s.String()))
+	panic(fmt.Errorf("unknown alert state: %v", s.String()))
 }
 
 // Alert is the user-level representation of a single instance of an alerting rule.
@@ -205,6 +204,10 @@ func (r *AlertingRule) Labels() labels.Labels {
 // Annotations returns the annotations of the alerting rule.
 func (r *AlertingRule) Annotations() labels.Labels {
 	return r.annotations
+}
+
+func (r *AlertingRule) equal(o *AlertingRule) bool {
+	return r.name == o.name && labels.Equal(r.labels, o.labels)
 }
 
 func (r *AlertingRule) sample(alert *Alert, ts time.Time) promql.Sample {
@@ -477,7 +480,7 @@ func (r *AlertingRule) String() string {
 
 	byt, err := yaml.Marshal(ar)
 	if err != nil {
-		return fmt.Sprintf("error marshaling alerting rule: %s", err.Error())
+		return fmt.Sprintf("error marshalling alerting rule: %s", err.Error())
 	}
 
 	return string(byt)
@@ -492,27 +495,27 @@ func (r *AlertingRule) HTMLSnippet(pathPrefix string) html_template.HTML {
 		alertNameLabel:        model.LabelValue(r.name),
 	}
 
-	labelsMap := make(map[string]string, len(r.labels))
+	labels := make(map[string]string, len(r.labels))
 	for _, l := range r.labels {
-		labelsMap[l.Name] = html_template.HTMLEscapeString(l.Value)
+		labels[l.Name] = html_template.HTMLEscapeString(l.Value)
 	}
 
-	annotationsMap := make(map[string]string, len(r.annotations))
+	annotations := make(map[string]string, len(r.annotations))
 	for _, l := range r.annotations {
-		annotationsMap[l.Name] = html_template.HTMLEscapeString(l.Value)
+		annotations[l.Name] = html_template.HTMLEscapeString(l.Value)
 	}
 
 	ar := rulefmt.Rule{
 		Alert:       fmt.Sprintf("<a href=%q>%s</a>", pathPrefix+strutil.TableLinkForExpression(alertMetric.String()), r.name),
 		Expr:        fmt.Sprintf("<a href=%q>%s</a>", pathPrefix+strutil.TableLinkForExpression(r.vector.String()), html_template.HTMLEscapeString(r.vector.String())),
 		For:         model.Duration(r.holdDuration),
-		Labels:      labelsMap,
-		Annotations: annotationsMap,
+		Labels:      labels,
+		Annotations: annotations,
 	}
 
 	byt, err := yaml.Marshal(ar)
 	if err != nil {
-		return html_template.HTML(fmt.Sprintf("error marshaling alerting rule: %q", html_template.HTMLEscapeString(err.Error())))
+		return html_template.HTML(fmt.Sprintf("error marshalling alerting rule: %q", html_template.HTMLEscapeString(err.Error())))
 	}
 	return html_template.HTML(byt)
 }
