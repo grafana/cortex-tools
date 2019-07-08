@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/grafana/cortex-tools/pkg/client"
-	"github.com/grafana/cortex-tools/pkg/parser"
+	"github.com/grafana/cortex-tool/pkg/client"
+	"github.com/grafana/cortex-tool/pkg/rules"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"gopkg.in/yaml.v2"
@@ -55,27 +55,40 @@ func main() {
 		}
 		fmt.Printf("---\n%s\n", string(d))
 	case getRuleGroupCmd.FullCommand():
-		rg, err := cli.GetRuleGroup(context.Background(), *namespace, *rulegroup)
+		group, err := cli.GetRuleGroup(context.Background(), *namespace, *rulegroup)
 		if err != nil {
 			log.Fatalf("unable to read rules from cortex, %v", err)
 		}
-		d, err := yaml.Marshal(&rg)
+		d, err := yaml.Marshal(&group)
 		if err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		fmt.Printf("---\n%s\n", string(d))
 	case loadRulesCmd.FullCommand():
-		nss, err := parser.ParseFiles(*ruleFiles)
+		nss, err := rules.ParseFiles(*ruleFiles)
 		if err != nil {
 			log.WithError(err).Fatalf("unable to parse rules files")
 		}
+
 		for _, ns := range nss {
-			for _, rg := range ns.Groups {
-				err := cli.CreateRuleGroup(context.Background(), ns.Namespace, rg)
+			for _, group := range ns.Groups {
+				curGroup, err := cli.GetRuleGroup(context.Background(), ns.Namespace, group.Name)
+				if curGroup != nil {
+					err = rules.CompareGroups(*curGroup, group)
+					if err == nil {
+						log.WithFields(log.Fields{
+							"group":     group.Name,
+							"namespace": ns.Namespace,
+						}).Infof("group already exists")
+						continue
+					}
+				}
+
+				err = cli.CreateRuleGroup(context.Background(), ns.Namespace, group)
 				if err != nil {
 					log.WithError(err).WithFields(log.Fields{
-						"group":     rg.Name,
-						"namespace": ns,
+						"group":     group.Name,
+						"namespace": ns.Namespace,
 					}).Fatalf("unable to load rule group")
 				}
 			}
