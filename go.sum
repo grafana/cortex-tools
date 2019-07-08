@@ -167,6 +167,8 @@ github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORR
 github.com/gorilla/context v1.1.1/go.mod h1:kBGZzfjB9CEq2AlWe17Uuf7NDRt0dE0s8S51q0aT7Yg=
 github.com/gorilla/mux v1.6.2 h1:Pgr17XVTNXAk3q/r4CpKzC5xBM/qW1uVLV+IhRZpIIk=
 github.com/gorilla/mux v1.6.2/go.mod h1:1lud6UwP+6orDFRuTfBEV8e9/aOM/c4fVVCaMa2zaAs=
+github.com/grafana/cortex v0.0.0-20190612145000-fe16b2bcbe10 h1:oMxeTR1KVnGsR0CxHbFeq76rVzgnTZyPE3/4qhedZp8=
+github.com/grafana/cortex v0.0.0-20190612145000-fe16b2bcbe10/go.mod h1:s0oVfUjaR6NtMqUAexFssTePnwf1rmTizyj+ZJMpYyo=
 github.com/grafana/cortex v0.0.0-20190627165620-c56fa2946dac h1:pHx1a8lqNdXdXD5Pj7K9+Qtzg3IKGY3HlEktvoh6mXw=
 github.com/grafana/cortex v0.0.0-20190627165620-c56fa2946dac/go.mod h1:s0oVfUjaR6NtMqUAexFssTePnwf1rmTizyj+ZJMpYyo=
 github.com/gregjones/httpcache v0.0.0-20180305231024-9cad4c3443a7 h1:pdN6V1QBWetyv/0+wjACpqVH+eVULgEjkurDLq3goeM=
