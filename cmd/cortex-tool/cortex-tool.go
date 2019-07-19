@@ -73,6 +73,10 @@ func main() {
 		for _, ns := range nss {
 			for _, group := range ns.Groups {
 				curGroup, err := cli.GetRuleGroup(context.Background(), ns.Namespace, group.Name)
+				if err != nil && err != client.ErrResourceNotFound {
+					log.WithError(err).Fatalf("unable to contact cortex api")
+					return
+				}
 				if curGroup != nil {
 					err = rules.CompareGroups(*curGroup, group)
 					if err == nil {
