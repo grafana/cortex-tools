@@ -2,7 +2,7 @@ module github.com/grafana/cortex-tool
 
 go 1.12
 
-// Temporary until rulesdb refactor is merged
+// TODO: Temporary until rulesdb refactor is merged https://github.com/cortexproject/cortex/pull/1513
 replace github.com/cortexproject/cortex => ../cortex
 
 require (
