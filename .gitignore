@@ -1,4 +1,5 @@
 cmd/cortex-tool/cortex-tool
+cmd/chunk-tool/chunk-tool
 .uptodate
 .pkg
 .cache
