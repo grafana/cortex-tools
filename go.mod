@@ -13,11 +13,16 @@ require (
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/common v0.4.1
-	github.com/prometheus/prometheus v0.0.0-20190417125241-3cc5f9d88062
+	github.com/prometheus/prometheus v0.0.0-20190731144842-63ed2e28f1ac
 	github.com/sirupsen/logrus v1.4.2
 	github.com/stretchr/testify v1.3.0
-	github.com/weaveworks/common v0.0.0-20190410110702-87611edc252e
+	github.com/weaveworks/common v0.0.0-20190714171817-ddeaa31513fd
 	golang.org/x/arch v0.0.0-20190312162104-788fe5ffcd8c // indirect
+	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4 // indirect
+	golang.org/x/net v0.0.0-20190724013045-ca1201d0de80 // indirect
+	golang.org/x/sys v0.0.0-20190804053845-51ab0e2deafa // indirect
+	golang.org/x/tools v0.0.0-20190807164442-cae9aa543496 // indirect
+	golang.org/x/tools/gopls v0.1.4-0.20190807164442-cae9aa543496 // indirect
 	google.golang.org/api v0.4.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.2.2
