@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	chunkCommand commands.DeleteChunkCommand
 	ruleCommand  commands.RuleCommand
 	logConfig    commands.LoggerConfig
 )
@@ -16,7 +15,7 @@ var (
 func main() {
 	kingpin.Version("0.0.1")
 	app := kingpin.New("cortex-cli", "A command-line tool to manage cortex.")
-	chunkCommand.Register(app)
+	commands.RegisterChunkCommands(app)
 	ruleCommand.Register(app)
 	logConfig.Register(app)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
