@@ -2,14 +2,17 @@ module github.com/grafana/cortex-tool
 
 go 1.12
 
-// TODO: Temporary until rulesdb refactor is merged https://github.com/cortexproject/cortex/pull/1513
-replace github.com/cortexproject/cortex => ../cortex
+replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.5.1
 
 require (
 	cloud.google.com/go v0.35.0
-	github.com/cortexproject/cortex v0.0.0-00010101000000-000000000000
+	github.com/cortexproject/cortex v0.1.1-0.20190808112445-606262b7a637
+	github.com/go-ini/ini v1.25.4 // indirect
+	github.com/hashicorp/consul v1.4.4 // indirect
+	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.8.1
+	github.com/prometheus/alertmanager v0.13.0 // indirect
 	github.com/prometheus/common v0.4.1
 	github.com/prometheus/prometheus v0.0.0-20190731144842-63ed2e28f1ac
 	github.com/sirupsen/logrus v1.4.2
