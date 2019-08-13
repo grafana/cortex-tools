@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	ruleCommand  commands.RuleCommand
-	logConfig    commands.LoggerConfig
+	ruleCommand commands.RuleCommand
+	logConfig   commands.LoggerConfig
+	pushGateway commands.PushGatewayConfig
 )
 
 func main() {
@@ -18,5 +19,8 @@ func main() {
 	commands.RegisterChunkCommands(app)
 	ruleCommand.Register(app)
 	logConfig.Register(app)
+	pushGateway.Register(app)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	pushGateway.Stop()
 }

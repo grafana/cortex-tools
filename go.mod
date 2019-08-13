@@ -6,6 +6,7 @@ replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.5.1
 
 require (
 	cloud.google.com/go v0.35.0
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/cortexproject/cortex v0.1.1-0.20190808112445-606262b7a637
 	github.com/go-ini/ini v1.25.4 // indirect
 	github.com/hashicorp/consul v1.4.4 // indirect
@@ -13,7 +14,8 @@ require (
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/alertmanager v0.13.0 // indirect
-	github.com/prometheus/common v0.4.1
+	github.com/prometheus/client_golang v1.1.0
+	github.com/prometheus/common v0.6.0
 	github.com/prometheus/prometheus v0.0.0-20190731144842-63ed2e28f1ac
 	github.com/sirupsen/logrus v1.4.2
 	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4 // indirect
