@@ -434,12 +434,12 @@ google.golang.org/grpc/resolver/dns
 google.golang.org/grpc/resolver/passthrough
 google.golang.org/grpc/stats
 google.golang.org/grpc/tap
-google.golang.org/grpc/encoding/gzip
-google.golang.org/grpc/health/grpc_health_v1
 google.golang.org/grpc/credentials/internal
 google.golang.org/grpc/balancer/base
 google.golang.org/grpc/binarylog/grpc_binarylog_v1
 google.golang.org/grpc/internal/syscall
+google.golang.org/grpc/encoding/gzip
+google.golang.org/grpc/health/grpc_health_v1
 google.golang.org/grpc/health
 # gopkg.in/alecthomas/kingpin.v2 v2.2.6
 gopkg.in/alecthomas/kingpin.v2
