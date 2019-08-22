@@ -154,6 +154,8 @@ github.com/opentracing/opentracing-go/log
 github.com/opentracing/opentracing-go/ext
 # github.com/pkg/errors v0.8.1
 github.com/pkg/errors
+# github.com/prometheus/alertmanager v0.13.0
+github.com/prometheus/alertmanager/config
 # github.com/prometheus/client_golang v1.1.0
 github.com/prometheus/client_golang/prometheus
 github.com/prometheus/client_golang/prometheus/push
