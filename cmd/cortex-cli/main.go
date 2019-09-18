@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/grafana/cortex-tool/pkg/commands"
+	"github.com/grafana/cortex-cli/pkg/commands"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
