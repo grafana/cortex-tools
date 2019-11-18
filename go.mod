@@ -1,4 +1,4 @@
-module github.com/grafana/cortex-cli
+module github.com/grafana/cortextool
 
 go 1.12
 

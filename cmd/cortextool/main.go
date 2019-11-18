@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/grafana/cortex-cli/pkg/commands"
+	"github.com/grafana/cortextool/pkg/commands"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -16,7 +16,7 @@ var (
 
 func main() {
 	kingpin.Version("0.0.1")
-	app := kingpin.New("cortex-cli", "A command-line tool to manage cortex.")
+	app := kingpin.New("cortextool", "A command-line tool to manage cortex.")
 	commands.RegisterChunkCommands(app)
 	alertCommand.Register(app)
 	ruleCommand.Register(app)
