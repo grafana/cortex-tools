@@ -6,7 +6,7 @@ replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.5.1
 
 require (
 	cloud.google.com/go v0.35.0
-	github.com/alecthomas/chroma v0.6.6
+	github.com/alecthomas/chroma v0.7.0
 	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/cortexproject/cortex v0.1.1-0.20190808112445-606262b7a637
