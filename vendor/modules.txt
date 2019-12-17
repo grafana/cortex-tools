@@ -12,10 +12,11 @@ cloud.google.com/go/internal/version
 cloud.google.com/go/longrunning
 cloud.google.com/go/longrunning/autogen
 cloud.google.com/go/storage
-# github.com/alecthomas/chroma v0.6.6
+# github.com/alecthomas/chroma v0.7.0
 github.com/alecthomas/chroma
 github.com/alecthomas/chroma/formatters
 github.com/alecthomas/chroma/formatters/html
+github.com/alecthomas/chroma/formatters/svg
 github.com/alecthomas/chroma/lexers
 github.com/alecthomas/chroma/lexers/a
 github.com/alecthomas/chroma/lexers/b

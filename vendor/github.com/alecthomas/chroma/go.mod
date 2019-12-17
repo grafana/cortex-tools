@@ -15,8 +15,10 @@ require (
 	github.com/mattn/go-colorable v0.0.9
 	github.com/mattn/go-isatty v0.0.4
 	github.com/sergi/go-diff v1.0.0 // indirect
-	github.com/stretchr/testify v1.3.0
+	github.com/stretchr/testify v1.3.0 // indirect
 	golang.org/x/sys v0.0.0-20181128092732-4ed8d59d0b35 // indirect
 )
 
 replace github.com/GeertJohan/go.rice => github.com/alecthomas/go.rice v1.0.1-0.20190719113735-961b99d742e7
+
+go 1.13
