@@ -288,8 +288,10 @@ func (c *Chunk) Decode(decodeContext *DecodeContext, input []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "when decoding chunk metadata")
 	}
-	if len(input)-r.Len() != int(metadataLen) {
-		return ErrMetadataLength
+	metadataRead := len(input) - r.Len()
+	// Older versions of Cortex included the initial length word; newer versions do not.
+	if !(metadataRead == int(metadataLen) || metadataRead == int(metadataLen)+4) {
+		return errors.Wrapf(ErrMetadataLength, "expected %d, got %d", metadataLen, metadataRead)
 	}
 
 	// Next, confirm the chunks matches what we expected.  Easiest way to do this
@@ -336,7 +338,7 @@ func equalByKey(a, b Chunk) bool {
 
 // Samples returns all SamplePairs for the chunk.
 func (c *Chunk) Samples(from, through model.Time) ([]model.SamplePair, error) {
-	it := c.Data.NewIterator()
+	it := c.Data.NewIterator(nil)
 	interval := metric.Interval{OldestInclusive: from, NewestInclusive: through}
 	return prom_chunk.RangeValues(it, interval)
 }

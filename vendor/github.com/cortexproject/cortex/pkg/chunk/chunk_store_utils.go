@@ -2,7 +2,6 @@ package chunk
 
 import (
 	"context"
-	"sort"
 	"sync"
 
 	"github.com/go-kit/kit/log/level"
@@ -38,20 +37,13 @@ func keysFromChunks(chunks []Chunk) []string {
 }
 
 func labelNamesFromChunks(chunks []Chunk) []string {
-	keys := map[string]struct{}{}
-	var result []string
+	var result UniqueStrings
 	for _, c := range chunks {
 		for _, l := range c.Metric {
-			if l.Name != model.MetricNameLabel {
-				if _, ok := keys[string(l.Name)]; !ok {
-					keys[string(l.Name)] = struct{}{}
-					result = append(result, string(l.Name))
-				}
-			}
+			result.Add(string(l.Name))
 		}
 	}
-	sort.Strings(result)
-	return result
+	return result.Strings()
 }
 
 func filterChunksByUniqueFingerprint(chunks []Chunk) ([]Chunk, []string) {
@@ -108,6 +100,7 @@ type decodeResponse struct {
 
 // NewChunkFetcher makes a new ChunkFetcher.
 func NewChunkFetcher(cfg cache.Config, cacheStubs bool, storage ObjectClient) (*Fetcher, error) {
+	cfg.Prefix = "chunks"
 	cache, err := cache.New(cfg)
 	if err != nil {
 		return nil, err
