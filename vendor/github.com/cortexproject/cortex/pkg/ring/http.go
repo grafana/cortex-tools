@@ -40,8 +40,12 @@ const tpl = `
 					</tr>
 				</thead>
 				<tbody>
-					{{ range .Ingesters }}
+					{{ range $i, $ing := .Ingesters }}
+					{{ if mod $i 2 }}
 					<tr>
+					{{ else }}
+					<tr bgcolor="#BEBEBE">
+					{{ end }}
 						<td>{{ .ID }}</td>
 						<td>{{ .State }}</td>
 						<td>{{ .Address }}</td>
@@ -53,6 +57,12 @@ const tpl = `
 					{{ end }}
 				</tbody>
 			</table>
+			<br>
+			{{ if .ShowTokens }}
+			<input type="button" value="Hide Ingester Tokens" onclick="window.location.href = '/ring'" />
+			{{ else }}
+			<input type="button" value="Show Ingester Tokens" onclick="window.location.href = '/ring?tokens=true'" />
+			{{ end }}
 			<pre>{{ .Ring }}</pre>
 		</form>
 	</body>
@@ -61,7 +71,9 @@ const tpl = `
 var tmpl *template.Template
 
 func init() {
-	tmpl = template.Must(template.New("webpage").Parse(tpl))
+	t := template.New("webpage")
+	t.Funcs(template.FuncMap{"mod": func(i, j int) bool { return i%j == 0 }})
+	tmpl = template.Must(t.Parse(tpl))
 }
 
 func (r *Ring) forget(ctx context.Context, id string) error {
@@ -123,14 +135,23 @@ func (r *Ring) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
+	tokensParam := req.URL.Query().Get("tokens")
+	var ringDescString string
+	showTokens := false
+	if tokensParam == "true" {
+		ringDescString = proto.MarshalTextString(r.ringDesc)
+		showTokens = true
+	}
 	if err := tmpl.Execute(w, struct {
-		Ingesters []interface{}
-		Now       time.Time
-		Ring      string
+		Ingesters  []interface{}
+		Now        time.Time
+		Ring       string
+		ShowTokens bool
 	}{
-		Ingesters: ingesters,
-		Now:       time.Now(),
-		Ring:      proto.MarshalTextString(r.ringDesc),
+		Ingesters:  ingesters,
+		Now:        time.Now(),
+		Ring:       ringDescString,
+		ShowTokens: showTokens,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -31,10 +31,13 @@ const (
 type ReadRing interface {
 	prometheus.Collector
 
-	Get(key uint32, op Operation) (ReplicationSet, error)
-	BatchGet(keys []uint32, op Operation) ([]ReplicationSet, error)
+	// Get returns n (or more) ingesters which form the replicas for the given key.
+	// buf is a slice to be overwritten for the return value
+	// to avoid memory allocation; can be nil.
+	Get(key uint32, op Operation, buf []IngesterDesc) (ReplicationSet, error)
 	GetAll() (ReplicationSet, error)
 	ReplicationFactor() int
+	IngesterCount() int
 }
 
 // Operation can be Read or Write
@@ -91,6 +94,7 @@ type Ring struct {
 	numMembersDesc      *prometheus.Desc
 	totalTokensDesc     *prometheus.Desc
 	numTokensDesc       *prometheus.Desc
+	oldestTimestampDesc *prometheus.Desc
 }
 
 // New creates a new Ring
@@ -130,6 +134,11 @@ func New(cfg Config, name string) (*Ring, error) {
 			"The number of tokens in the ring owned by the member",
 			[]string{"member", "name"}, nil,
 		),
+		oldestTimestampDesc: prometheus.NewDesc(
+			"cortex_ring_oldest_member_timestamp",
+			"Timestamp of the oldest member in the ring.",
+			[]string{"state", "name"}, nil,
+		),
 	}
 	var ctx context.Context
 	ctx, r.quit = context.WithCancel(context.Background())
@@ -158,6 +167,8 @@ func (r *Ring) loop(ctx context.Context) {
 		r.ringDesc = ringDesc
 		return true
 	})
+
+	r.KVClient.Stop()
 }
 
 // migrateRing will denormalise the ring's tokens if stored in normal form.
@@ -181,37 +192,16 @@ func migrateRing(desc *Desc) []TokenDesc {
 }
 
 // Get returns n (or more) ingesters which form the replicas for the given key.
-func (r *Ring) Get(key uint32, op Operation) (ReplicationSet, error) {
+func (r *Ring) Get(key uint32, op Operation, buf []IngesterDesc) (ReplicationSet, error) {
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
-	return r.getInternal(key, op)
-}
-
-// BatchGet returns ReplicationFactor (or more) ingesters which form the replicas
-// for the given keys. The order of the result matches the order of the input.
-func (r *Ring) BatchGet(keys []uint32, op Operation) ([]ReplicationSet, error) {
-	r.mtx.RLock()
-	defer r.mtx.RUnlock()
-
-	result := make([]ReplicationSet, len(keys), len(keys))
-	for i, key := range keys {
-		rs, err := r.getInternal(key, op)
-		if err != nil {
-			return nil, err
-		}
-		result[i] = rs
-	}
-	return result, nil
-}
-
-func (r *Ring) getInternal(key uint32, op Operation) (ReplicationSet, error) {
 	if r.ringDesc == nil || len(r.ringDesc.Tokens) == 0 {
 		return ReplicationSet{}, ErrEmptyRing
 	}
 
 	var (
 		n             = r.cfg.ReplicationFactor
-		ingesters     = make([]IngesterDesc, 0, n)
+		ingesters     = buf[:0]
 		distinctHosts = map[string]struct{}{}
 		start         = r.search(key)
 		iterations    = 0
@@ -352,23 +342,27 @@ func (r *Ring) Collect(ch chan<- prometheus.Metric) {
 		)
 	}
 
+	numByState := map[string]int{}
+	oldestTimestampByState := map[string]int64{}
+
 	// Initialised to zero so we emit zero-metrics (instead of not emitting anything)
-	byState := map[string]int{
-		unhealthy:        0,
-		ACTIVE.String():  0,
-		LEAVING.String(): 0,
-		PENDING.String(): 0,
-		JOINING.String(): 0,
+	for _, s := range []string{unhealthy, ACTIVE.String(), LEAVING.String(), PENDING.String(), JOINING.String()} {
+		numByState[s] = 0
+		oldestTimestampByState[s] = 0
 	}
+
 	for _, ingester := range r.ringDesc.Ingesters {
+		s := ingester.State.String()
 		if !r.IsHealthy(&ingester, Reporting) {
-			byState[unhealthy]++
-		} else {
-			byState[ingester.State.String()]++
+			s = unhealthy
+		}
+		numByState[s]++
+		if oldestTimestampByState[s] == 0 || ingester.Timestamp < oldestTimestampByState[s] {
+			oldestTimestampByState[s] = ingester.Timestamp
 		}
 	}
 
-	for state, count := range byState {
+	for state, count := range numByState {
 		ch <- prometheus.MustNewConstMetric(
 			r.numMembersDesc,
 			prometheus.GaugeValue,
@@ -377,6 +371,16 @@ func (r *Ring) Collect(ch chan<- prometheus.Metric) {
 			r.name,
 		)
 	}
+	for state, timestamp := range oldestTimestampByState {
+		ch <- prometheus.MustNewConstMetric(
+			r.oldestTimestampDesc,
+			prometheus.GaugeValue,
+			float64(timestamp),
+			state,
+			r.name,
+		)
+	}
+
 	ch <- prometheus.MustNewConstMetric(
 		r.totalTokensDesc,
 		prometheus.GaugeValue,
