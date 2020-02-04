@@ -12,6 +12,7 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.9 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/alertmanager v0.20.0
@@ -22,4 +23,5 @@ require (
 	google.golang.org/api v0.8.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.2.2
+	sigs.k8s.io/yaml v1.1.0
 )
