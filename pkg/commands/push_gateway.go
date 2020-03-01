@@ -61,13 +61,18 @@ func (l *PushGatewayConfig) loop() {
 	defer close(l.terminated)
 
 	for {
+		var err error
 		select {
 		case <-l.done:
-			err := l.pusher.Add()
-			logrus.WithError(err).Errorln("unable to forward metrics to pushgateway")
+			err = l.pusher.Add()
+			if err != nil {
+				logrus.WithError(err).Errorln("unable to forward metrics to pushgateway")
+			}
 			return
 		case <-timer.C:
-			err := l.pusher.Add()
+			err = l.pusher.Add()
+		}
+		if err != nil {
 			logrus.WithError(err).Errorln("unable to forward metrics to pushgateway")
 		}
 	}
