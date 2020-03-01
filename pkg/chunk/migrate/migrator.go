@@ -49,13 +49,13 @@ func (m *Migrator) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go m.reader.Run(ctx, m.chunkBuffer)
-	m.writer.Run(ctx, m.chunkBuffer)
+
+	err := m.writer.Run(ctx, m.chunkBuffer)
+	if err != nil {
+		logrus.WithError(err).Errorln("stopped migrator due to an error in writer")
+	}
 	if m.reader.Err() != nil {
 		logrus.WithError(m.reader.Err()).Errorln("stopped migrator due to an error in reader")
-	}
-
-	if m.writer.Err() != nil {
-		logrus.WithError(m.reader.Err()).Errorln("stopped migrator due to an error in writer")
 	}
 }
 
