@@ -10,6 +10,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/util/validation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -24,6 +25,7 @@ var (
 type Config struct {
 	StorageConfig storage.Config     `yaml:"storage"`
 	SchemaConfig  chunk.SchemaConfig `yaml:"schema"`
+	NumWorkers    int                `yaml:"num_workers"`
 }
 
 // Writer receives chunks and stores them in a storage backend
@@ -31,8 +33,6 @@ type Writer struct {
 	cfg        Config
 	chunkStore chunk.Store
 	mapper     Mapper
-
-	quit chan struct{}
 }
 
 // NewWriter returns a Writer object
@@ -51,17 +51,32 @@ func NewWriter(cfg Config, mapper Mapper) (*Writer, error) {
 		cfg:        cfg,
 		chunkStore: chunkStore,
 		mapper:     mapper,
-		quit:       make(chan struct{}),
 	}
 	return &writer, nil
 }
 
 // Run initializes the writer workers
 func (w *Writer) Run(ctx context.Context, inChan chan chunk.Chunk) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	for i := 0; i < w.cfg.NumWorkers; i++ {
+		g.Go(func() error {
+			return w.run(ctx, i, inChan)
+		})
+	}
+
+	return g.Wait()
+}
+
+func (w *Writer) run(ctx context.Context, workerID int, inChan chan chunk.Chunk) error {
 	backoff := util.NewBackoff(ctx, util.BackoffConfig{
 		MaxBackoff: time.Minute * 1,
 		MinBackoff: time.Second * 1,
 	})
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,7 +92,6 @@ func (w *Writer) Run(ctx context.Context, inChan chan chunk.Chunk) error {
 			remapped, err := w.mapper.MapChunk(c)
 			if err != nil {
 				logrus.WithError(err).Errorln("failed to remap chunk", "err", err)
-
 				return err
 			}
 
@@ -90,10 +104,9 @@ func (w *Writer) Run(ctx context.Context, inChan chan chunk.Chunk) error {
 			for backoff.Ongoing() {
 				err = w.chunkStore.PutOne(ctx, remapped.From, remapped.Through, remapped)
 				if err != nil {
-					logrus.WithError(err).WithField("retries", backoff.NumRetries()).Errorf("failed to store chunk")
+					logrus.WithError(err).WithField("num_retries", backoff.NumRetries()).Errorln("failed to store chunk, retrying")
 					backoff.Wait()
 				} else {
-					backoff.Reset()
 					break
 				}
 			}

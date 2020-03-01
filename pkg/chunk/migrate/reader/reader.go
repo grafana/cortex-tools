@@ -9,6 +9,7 @@ import (
 	cortex_storage "github.com/cortexproject/cortex/pkg/chunk/storage"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/grafana/cortextool/pkg/chunk"
 	"github.com/grafana/cortextool/pkg/chunk/storage"
@@ -73,65 +74,51 @@ func NewReader(cfg Config, plannerCfg PlannerConfig) (*Reader, error) {
 
 // Run initializes the writer workers
 func (r *Reader) Run(ctx context.Context, outChan chan cortex_chunk.Chunk) {
-	errChan := make(chan error)
 	defer close(outChan)
 
-	readCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// starting workers
+	g, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < r.cfg.NumWorkers; i++ {
-		r.workerGroup.Add(1)
-		go r.readLoop(readCtx, outChan, errChan)
+		g.Go(func() error {
+			return r.readLoop(ctx, outChan)
+		})
 	}
-
-	go func() {
-		// cancel context when an error occurs or errChan is closed
-		defer cancel()
-
-		err := <-errChan
-		if err != nil {
-			r.err = err
-			logrus.WithError(err).Errorln("error scanning chunks, stopping read operation")
-			close(r.quit)
-		}
-	}()
 
 	scanRequests := r.planner.Plan()
 	logrus.Infof("built %d plans for reading", len(scanRequests))
 
-	defer func() {
-		// lets wait for all workers to finish before we return.
-		// An error in errChan would cause all workers to stop because we cancel the context.
-		// Otherwise closure of scanRequestsChan(which is done after sending all the scanRequests) should make all workers to stop.
-		r.workerGroup.Wait()
-		close(errChan)
-	}()
-
 	// feeding scan requests to workers
 	for _, req := range scanRequests {
 		select {
+		case <-ctx.Done():
+			logrus.Info("shutting down reader because context was cancelled")
+			return nil
 		case r.scanRequestsChan <- req:
 			continue
 		case <-r.quit:
-			return
+			return nil
 		}
 	}
 
 	// all scan requests are fed, close the channel
 	close(r.scanRequestsChan)
+
+	r.err = g.Wait()
 }
 
-func (r *Reader) readLoop(ctx context.Context, outChan chan cortex_chunk.Chunk, errChan chan error) {
+func (r *Reader) readLoop(ctx context.Context, outChan chan cortex_chunk.Chunk) error {
 	defer r.workerGroup.Done()
 
 	for {
 		select {
 		case <-ctx.Done():
 			logrus.Infoln("shutting down reader because context was cancelled")
-			return
+			return nil
 		case req, open := <-r.scanRequestsChan:
 			if !open {
-				return
+				return nil
 			}
 
 			logEntry := logrus.WithFields(logrus.Fields{
@@ -148,8 +135,7 @@ func (r *Reader) readLoop(ctx context.Context, outChan chan cortex_chunk.Chunk, 
 
 			if err != nil {
 				logEntry.WithError(err).Errorln("error scanning chunks")
-				errChan <- fmt.Errorf("scan request failed, %v", req)
-				return
+				return fmt.Errorf("scan request failed, %v", req)
 			}
 
 			logEntry.Infoln("completed scan request")
