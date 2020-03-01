@@ -94,11 +94,11 @@ func (r *Reader) Run(ctx context.Context, outChan chan cortex_chunk.Chunk) {
 		select {
 		case <-ctx.Done():
 			logrus.Info("shutting down reader because context was cancelled")
-			return nil
+			return
 		case r.scanRequestsChan <- req:
 			continue
 		case <-r.quit:
-			return nil
+			return
 		}
 	}
 
