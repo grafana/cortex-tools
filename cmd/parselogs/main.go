@@ -87,15 +87,16 @@ func main() {
 
 				if start != "" && end != "" {
 					var st, et int64
-					//First try to parse as unix sec timestamps
-					st, err = strconv.ParseInt(start, 10, 64)
-					et, err = strconv.ParseInt(end, 10, 64)
-					if err != nil {
+					var st_err, et_err error
+					// First try to parse as unix sec timestamps
+					st, st_err = strconv.ParseInt(start, 10, 64)
+					et, et_err = strconv.ParseInt(end, 10, 64)
+					if st_err != nil || et_err != nil {
 						//Next try to parse as time/date
 						var st, et time.Time
-						st, err = time.Parse(layout, start)
-						et, err = time.Parse(layout, end)
-						if err != nil {
+						st, st_err = time.Parse(layout, start)
+						et, et_err = time.Parse(layout, end)
+						if st_err != nil || et_err != nil {
 							fmt.Println(err, line)
 							continue
 						}
