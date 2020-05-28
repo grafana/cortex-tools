@@ -3,20 +3,29 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"github.com/google/martian/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
+
+var writeRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "write_requests_duration_seconds",
+	Buckets: prometheus.DefBuckets,
+}, []string{"success"})
 
 type LoadgenCommand struct {
 	url            string
@@ -25,6 +34,8 @@ type LoadgenCommand struct {
 	parallelism    int
 	batchSize      int
 	timeout        time.Duration
+
+	metricsListenAddress string
 
 	wg     sync.WaitGroup
 	client *remote.Client
@@ -45,6 +56,8 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 		Default("100").IntVar(&loadgenCommand.batchSize)
 	cmd.Flag("request-timeout", "timeout for write requests").
 		Default("500ms").DurationVar(&loadgenCommand.timeout)
+	cmd.Flag("metrics-listen-address", "address to serve metrics on").
+		Default(":8080").StringVar(&loadgenCommand.metricsListenAddress)
 }
 
 func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
@@ -61,6 +74,9 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 	c.client = client
+
+	http.Handle("/metrics", promhttp.Handler())
+	go log.Fatal(http.ListenAndServe(c.metricsListenAddress, nil))
 
 	c.wg.Add(c.parallelism)
 
@@ -85,7 +101,7 @@ func (c *LoadgenCommand) runShard(from, to int) {
 func (c *LoadgenCommand) runScrape(from, to int) {
 	for i := from; i < to; i += c.batchSize {
 		if err := c.runBatch(i, i+c.batchSize); err != nil {
-			log.Errorf("error sending batch: %v", err)
+			log.Printf("error sending batch: %v", err)
 		}
 	}
 	fmt.Printf("sent %d samples\n", to-from)
@@ -123,9 +139,12 @@ func (c *LoadgenCommand) runBatch(from, to int) error {
 
 	compressed := snappy.Encode(nil, data)
 
+	start := time.Now()
 	if err := c.client.Store(context.Background(), compressed); err != nil {
+		writeRequestDuration.WithLabelValues("error").Observe(time.Now().Sub(start).Seconds())
 		return err
 	}
+	writeRequestDuration.WithLabelValues("success").Observe(time.Now().Sub(start).Seconds())
 
 	return nil
 }
