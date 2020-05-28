@@ -76,7 +76,7 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 	c.client = client
 
 	http.Handle("/metrics", promhttp.Handler())
-	go log.Fatal(http.ListenAndServe(c.metricsListenAddress, nil))
+	go http.ListenAndServe(c.metricsListenAddress, nil)
 
 	c.wg.Add(c.parallelism)
 

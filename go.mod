@@ -12,7 +12,6 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/gogo/protobuf v1.2.2-0.20190730201129-28a6bbf47e48
 	github.com/golang/snappy v0.0.1
-	github.com/google/martian v2.1.0+incompatible
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.9 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
