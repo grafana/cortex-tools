@@ -24,5 +24,6 @@ require (
 	google.golang.org/api v0.8.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.2.2
+	gopkg.in/yaml.v3 v3.0.0-20200506231410-2ff61e1afc86
 	sigs.k8s.io/yaml v1.1.0
 )
