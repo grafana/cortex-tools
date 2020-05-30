@@ -12,6 +12,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -23,29 +25,41 @@ import (
 )
 
 var writeRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-	Name:    "write_requests_duration_seconds",
+	Name:    "write_request_duration_seconds",
+	Buckets: prometheus.DefBuckets,
+}, []string{"success"})
+
+var queryRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "query_request_duration_seconds",
 	Buckets: prometheus.DefBuckets,
 }, []string{"success"})
 
 type LoadgenCommand struct {
-	url            string
+	writeURL       string
 	activeSeries   int
 	scrapeInterval time.Duration
 	parallelism    int
 	batchSize      int
-	timeout        time.Duration
+	writeTimeout   time.Duration
+
+	queryURL         string
+	query            string
+	queryParallelism int
+	queryTimeout     time.Duration
 
 	metricsListenAddress string
 
-	wg     sync.WaitGroup
-	client *remote.Client
+	// Runtime stuff.
+	wg          sync.WaitGroup
+	writeClient *remote.Client
+	queryClient v1.API
 }
 
 func (c *LoadgenCommand) Register(app *kingpin.Application) {
 	loadgenCommand := &LoadgenCommand{}
 	cmd := app.Command("loadgen", "Simple load generator for Cortex.").Action(loadgenCommand.run)
-	cmd.Flag("url", "").
-		Required().StringVar(&loadgenCommand.url)
+	cmd.Flag("write-url", "").
+		Required().StringVar(&loadgenCommand.writeURL)
 	cmd.Flag("active-series", "number of active series to send").
 		Default("1000").IntVar(&loadgenCommand.activeSeries)
 	cmd.Flag("scrape-interval", "period to send metrics").
@@ -54,42 +68,65 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 		Default("10").IntVar(&loadgenCommand.parallelism)
 	cmd.Flag("batch-size", "how big a batch to send").
 		Default("100").IntVar(&loadgenCommand.batchSize)
-	cmd.Flag("request-timeout", "timeout for write requests").
-		Default("500ms").DurationVar(&loadgenCommand.timeout)
+	cmd.Flag("write-timeout", "timeout for write requests").
+		Default("500ms").DurationVar(&loadgenCommand.writeTimeout)
+
+	cmd.Flag("query-url", "").
+		Required().StringVar(&loadgenCommand.queryURL)
+	cmd.Flag("query", "query to run").
+		Default("sum(node_cpu_seconds_total)").StringVar(&loadgenCommand.query)
+	cmd.Flag("query-parallelism", "number of queries to run in parallel").
+		Default("10").IntVar(&loadgenCommand.queryParallelism)
+	cmd.Flag("query-timeout", "").
+		Default("20s").DurationVar(&loadgenCommand.queryTimeout)
+
 	cmd.Flag("metrics-listen-address", "address to serve metrics on").
 		Default(":8080").StringVar(&loadgenCommand.metricsListenAddress)
 }
 
 func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
-	url, err := url.Parse(c.url)
+	writeURL, err := url.Parse(c.writeURL)
 	if err != nil {
 		return err
 	}
 
-	client, err := remote.NewClient(0, &remote.ClientConfig{
-		URL:     &config.URL{URL: url},
-		Timeout: model.Duration(c.timeout),
+	writeClient, err := remote.NewClient(0, &remote.ClientConfig{
+		URL:     &config.URL{URL: writeURL},
+		Timeout: model.Duration(c.writeTimeout),
 	})
 	if err != nil {
 		return err
 	}
-	c.client = client
+	c.writeClient = writeClient
+
+	queryClient, err := api.NewClient(api.Config{
+		Address: c.queryURL,
+	})
+	if err != nil {
+		return err
+	}
+	c.queryClient = v1.NewAPI(queryClient)
 
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(c.metricsListenAddress, nil)
 
 	c.wg.Add(c.parallelism)
+	c.wg.Add(c.queryParallelism)
 
 	metricsPerShard := c.activeSeries / c.parallelism
 	for i := 0; i < c.activeSeries; i += metricsPerShard {
-		go c.runShard(i, i+metricsPerShard)
+		go c.runWriteShard(i, i+metricsPerShard)
+	}
+
+	for i := 0; i < c.queryParallelism; i++ {
+		go c.runQueryShard()
 	}
 
 	c.wg.Wait()
 	return nil
 }
 
-func (c *LoadgenCommand) runShard(from, to int) {
+func (c *LoadgenCommand) runWriteShard(from, to int) {
 	defer c.wg.Done()
 	ticker := time.NewTicker(c.scrapeInterval)
 	c.runScrape(from, to)
@@ -140,11 +177,35 @@ func (c *LoadgenCommand) runBatch(from, to int) error {
 	compressed := snappy.Encode(nil, data)
 
 	start := time.Now()
-	if err := c.client.Store(context.Background(), compressed); err != nil {
+	if err := c.writeClient.Store(context.Background(), compressed); err != nil {
 		writeRequestDuration.WithLabelValues("error").Observe(time.Now().Sub(start).Seconds())
 		return err
 	}
 	writeRequestDuration.WithLabelValues("success").Observe(time.Now().Sub(start).Seconds())
 
 	return nil
+}
+
+func (c *LoadgenCommand) runQueryShard() {
+	defer c.wg.Done()
+	for {
+		c.runQuery()
+	}
+}
+
+func (c *LoadgenCommand) runQuery() {
+	ctx, cancel := context.WithTimeout(context.Background(), c.queryTimeout)
+	defer cancel()
+	r := v1.Range{
+		Start: time.Now().Add(-time.Hour),
+		End:   time.Now(),
+		Step:  time.Minute,
+	}
+	start := time.Now()
+	_, _, err := c.queryClient.QueryRange(ctx, c.query, r)
+	if err != nil {
+		queryRequestDuration.WithLabelValues("error").Observe(time.Now().Sub(start).Seconds())
+		log.Printf("error doing query: %v", err)
+	}
+	queryRequestDuration.WithLabelValues("success").Observe(time.Now().Sub(start).Seconds())
 }
