@@ -46,6 +46,7 @@ type LoadgenCommand struct {
 	query            string
 	queryParallelism int
 	queryTimeout     time.Duration
+	queryDuration    time.Duration
 
 	metricsListenAddress string
 
@@ -79,6 +80,8 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 		Default("10").IntVar(&loadgenCommand.queryParallelism)
 	cmd.Flag("query-timeout", "").
 		Default("20s").DurationVar(&loadgenCommand.queryTimeout)
+	cmd.Flag("query-duration", "length of query").
+		Default("1h").DurationVar(&loadgenCommand.queryDuration)
 
 	cmd.Flag("metrics-listen-address", "address to serve metrics on").
 		Default(":8080").StringVar(&loadgenCommand.metricsListenAddress)
@@ -197,7 +200,7 @@ func (c *LoadgenCommand) runQuery() {
 	ctx, cancel := context.WithTimeout(context.Background(), c.queryTimeout)
 	defer cancel()
 	r := v1.Range{
-		Start: time.Now().Add(-time.Hour),
+		Start: time.Now().Add(-c.queryDuration),
 		End:   time.Now(),
 		Step:  time.Minute,
 	}
