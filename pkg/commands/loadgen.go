@@ -209,6 +209,7 @@ func (c *LoadgenCommand) runQuery() {
 	if err != nil {
 		queryRequestDuration.WithLabelValues("error").Observe(time.Now().Sub(start).Seconds())
 		log.Printf("error doing query: %v", err)
+		return
 	}
 	queryRequestDuration.WithLabelValues("success").Observe(time.Now().Sub(start).Seconds())
 }
