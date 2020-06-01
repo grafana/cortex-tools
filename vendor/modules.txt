@@ -141,6 +141,8 @@ github.com/cortexproject/cortex/pkg/util/spanlogger
 github.com/cortexproject/cortex/pkg/util/validation
 # github.com/danwakefield/fnmatch v0.0.0-20160403171240-cbb64ac3d964
 github.com/danwakefield/fnmatch
+# github.com/davecgh/go-spew v1.1.1
+github.com/davecgh/go-spew/spew
 # github.com/dgrijalva/jwt-go v3.2.0+incompatible
 github.com/dgrijalva/jwt-go
 # github.com/dlclark/regexp2 v1.2.0
@@ -282,6 +284,8 @@ github.com/opentracing/opentracing-go/ext
 github.com/opentracing/opentracing-go/log
 # github.com/pkg/errors v0.8.1
 github.com/pkg/errors
+# github.com/pmezard/go-difflib v1.0.0
+github.com/pmezard/go-difflib/difflib
 # github.com/prometheus/alertmanager v0.20.0
 github.com/prometheus/alertmanager/config
 # github.com/prometheus/client_golang v1.3.0
@@ -338,6 +342,9 @@ github.com/sirupsen/logrus
 github.com/soheilhy/cmux
 # github.com/spf13/pflag v1.0.3
 github.com/spf13/pflag
+# github.com/stretchr/testify v1.4.0
+github.com/stretchr/testify/assert
+github.com/stretchr/testify/require
 # github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5
 github.com/tmc/grpc-websocket-proxy/wsproxy
 # github.com/uber/jaeger-client-go v2.20.0+incompatible
@@ -608,6 +615,8 @@ gopkg.in/alecthomas/kingpin.v2
 gopkg.in/inf.v0
 # gopkg.in/yaml.v2 v2.2.2
 gopkg.in/yaml.v2
+# gopkg.in/yaml.v3 v3.0.0-20200506231410-2ff61e1afc86
+gopkg.in/yaml.v3
 # rsc.io/binaryregexp v0.2.0
 rsc.io/binaryregexp
 rsc.io/binaryregexp/syntax
