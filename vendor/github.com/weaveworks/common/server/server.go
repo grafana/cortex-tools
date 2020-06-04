@@ -1,8 +1,10 @@
 package server
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // anonymous import to get the pprof handler registered
@@ -14,8 +16,12 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	node_https "github.com/prometheus/node_exporter/https"
 	"golang.org/x/net/context"
+	"golang.org/x/net/netutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/weaveworks/common/httpgrpc"
 	httpgrpc_server "github.com/weaveworks/common/httpgrpc/server"
@@ -27,9 +33,16 @@ import (
 
 // Config for a Server
 type Config struct {
-	MetricsNamespace string `yaml:"-"`
-	HTTPListenPort   int    `yaml:"http_listen_port"`
-	GRPCListenPort   int    `yaml:"grpc_listen_port"`
+	MetricsNamespace  string `yaml:"-"`
+	HTTPListenAddress string `yaml:"http_listen_address"`
+	HTTPListenPort    int    `yaml:"http_listen_port"`
+	HTTPConnLimit     int    `yaml:"http_listen_conn_limit"`
+	GRPCListenAddress string `yaml:"grpc_listen_address"`
+	GRPCListenPort    int    `yaml:"grpc_listen_port"`
+	GRPCConnLimit     int    `yaml:"grpc_listen_conn_limit"`
+
+	HTTPTLSConfig node_https.TLSStruct `yaml:"http_tls_config"`
+	GRPCTLSConfig node_https.TLSStruct `yaml:"grpc_tls_config"`
 
 	RegisterInstrumentation bool `yaml:"register_instrumentation"`
 	ExcludeRequestInLog     bool `yaml:"-"`
@@ -44,9 +57,14 @@ type Config struct {
 	GRPCStreamMiddleware []grpc.StreamServerInterceptor `yaml:"-"`
 	HTTPMiddleware       []middleware.Interface         `yaml:"-"`
 
-	GPRCServerMaxRecvMsgSize       int  `yaml:"grpc_server_max_recv_msg_size"`
-	GRPCServerMaxSendMsgSize       int  `yaml:"grpc_server_max_send_msg_size"`
-	GPRCServerMaxConcurrentStreams uint `yaml:"grpc_server_max_concurrent_streams"`
+	GPRCServerMaxRecvMsgSize        int           `yaml:"grpc_server_max_recv_msg_size"`
+	GRPCServerMaxSendMsgSize        int           `yaml:"grpc_server_max_send_msg_size"`
+	GPRCServerMaxConcurrentStreams  uint          `yaml:"grpc_server_max_concurrent_streams"`
+	GRPCServerMaxConnectionIdle     time.Duration `yaml:"grpc_server_max_connection_idle"`
+	GRPCServerMaxConnectionAge      time.Duration `yaml:"grpc_server_max_connection_age"`
+	GRPCServerMaxConnectionAgeGrace time.Duration `yaml:"grpc_server_max_connection_age_grace"`
+	GRPCServerTime                  time.Duration `yaml:"grpc_server_keepalive_time"`
+	GRPCServerTimeout               time.Duration `yaml:"grpc_server_keepalive_timeout"`
 
 	LogLevel logging.Level     `yaml:"log_level"`
 	Log      logging.Interface `yaml:"-"`
@@ -54,10 +72,24 @@ type Config struct {
 	PathPrefix string `yaml:"http_path_prefix"`
 }
 
+var infinty = time.Duration(math.MaxInt64)
+
 // RegisterFlags adds the flags required to config this to the given FlagSet
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
+	f.StringVar(&cfg.HTTPListenAddress, "server.http-listen-address", "", "HTTP server listen address.")
+	f.StringVar(&cfg.HTTPTLSConfig.TLSCertPath, "server.http-tls-cert-path", "", "HTTP server cert path.")
+	f.StringVar(&cfg.HTTPTLSConfig.TLSKeyPath, "server.http-tls-key-path", "", "HTTP server key path.")
+	f.StringVar(&cfg.HTTPTLSConfig.ClientAuth, "server.http-tls-client-auth", "", "HTTP TLS Client Auth type.")
+	f.StringVar(&cfg.HTTPTLSConfig.ClientCAs, "server.http-tls-ca-path", "", "HTTP TLS Client CA path.")
+	f.StringVar(&cfg.GRPCTLSConfig.TLSCertPath, "server.grpc-tls-cert-path", "", "GRPC TLS server cert path.")
+	f.StringVar(&cfg.GRPCTLSConfig.TLSKeyPath, "server.grpc-tls-key-path", "", "GRPC TLS server key path.")
+	f.StringVar(&cfg.GRPCTLSConfig.ClientAuth, "server.grpc-tls-client-auth", "", "GRPC TLS Client Auth type.")
+	f.StringVar(&cfg.GRPCTLSConfig.ClientCAs, "server.grpc-tls-ca-path", "", "GRPC TLS Client CA path.")
 	f.IntVar(&cfg.HTTPListenPort, "server.http-listen-port", 80, "HTTP server listen port.")
+	f.IntVar(&cfg.HTTPConnLimit, "server.http-conn-limit", 0, "Maximum number of simultaneous http connections, <=0 to disable")
+	f.StringVar(&cfg.GRPCListenAddress, "server.grpc-listen-address", "", "gRPC server listen address.")
 	f.IntVar(&cfg.GRPCListenPort, "server.grpc-listen-port", 9095, "gRPC server listen port.")
+	f.IntVar(&cfg.GRPCConnLimit, "server.grpc-conn-limit", 0, "Maximum number of simultaneous grpc connections, <=0 to disable")
 	f.BoolVar(&cfg.RegisterInstrumentation, "server.register-instrumentation", true, "Register the intrumentation handlers (/metrics etc).")
 	f.DurationVar(&cfg.ServerGracefulShutdownTimeout, "server.graceful-shutdown-timeout", 30*time.Second, "Timeout for graceful shutdowns")
 	f.DurationVar(&cfg.HTTPServerReadTimeout, "server.http-read-timeout", 30*time.Second, "Read timeout for HTTP server")
@@ -66,6 +98,11 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&cfg.GPRCServerMaxRecvMsgSize, "server.grpc-max-recv-msg-size-bytes", 4*1024*1024, "Limit on the size of a gRPC message this server can receive (bytes).")
 	f.IntVar(&cfg.GRPCServerMaxSendMsgSize, "server.grpc-max-send-msg-size-bytes", 4*1024*1024, "Limit on the size of a gRPC message this server can send (bytes).")
 	f.UintVar(&cfg.GPRCServerMaxConcurrentStreams, "server.grpc-max-concurrent-streams", 100, "Limit on the number of concurrent streams for gRPC calls (0 = unlimited)")
+	f.DurationVar(&cfg.GRPCServerMaxConnectionIdle, "server.grpc.keepalive.max-connection-idle", infinty, "The duration after which an idle connection should be closed. Default: infinity")
+	f.DurationVar(&cfg.GRPCServerMaxConnectionAge, "server.grpc.keepalive.max-connection-age", infinty, "The duration for the maximum amount of time a connection may exist before it will be closed. Default: infinity")
+	f.DurationVar(&cfg.GRPCServerMaxConnectionAgeGrace, "server.grpc.keepalive.max-connection-age-grace", infinty, "An additive period after max-connection-age after which the connection will be forcibly closed. Default: infinity")
+	f.DurationVar(&cfg.GRPCServerTime, "server.grpc.keepalive.time", time.Hour*2, "Duration after which a keepalive probe is sent in case of no activity over the connection., Default: 2h")
+	f.DurationVar(&cfg.GRPCServerTimeout, "server.grpc.keepalive.timeout", time.Second*20, "After having pinged for keepalive check, the duration after which an idle connection should be closed, Default: 20s")
 	f.StringVar(&cfg.PathPrefix, "server.path-prefix", "", "Base path to serve all API routes from (e.g. /v1/)")
 	cfg.LogLevel.RegisterFlags(f)
 }
@@ -88,14 +125,46 @@ type Server struct {
 // New makes a new Server
 func New(cfg Config) (*Server, error) {
 	// Setup listeners first, so we can fail early if the port is in use.
-	httpListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.HTTPListenPort))
+	httpListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.HTTPListenAddress, cfg.HTTPListenPort))
+	if err != nil {
+		return nil, err
+	}
+	if cfg.HTTPConnLimit > 0 {
+		httpListener = netutil.LimitListener(httpListener, cfg.HTTPConnLimit)
+	}
+
+	grpcListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCListenPort))
 	if err != nil {
 		return nil, err
 	}
 
-	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPCListenPort))
-	if err != nil {
-		return nil, err
+	if cfg.GRPCConnLimit > 0 {
+		grpcListener = netutil.LimitListener(grpcListener, cfg.GRPCConnLimit)
+	}
+
+	// If user doesn't supply a logging implementation, by default instantiate
+	// logrus.
+	log := cfg.Log
+	if log == nil {
+		log = logging.NewLogrus(cfg.LogLevel)
+	}
+
+	// Setup TLS
+	var httpTLSConfig *tls.Config
+	if len(cfg.HTTPTLSConfig.TLSCertPath) > 0 && len(cfg.HTTPTLSConfig.TLSKeyPath) > 0 {
+		// Note: ConfigToTLSConfig from prometheus/node_exporter is awaiting security review.
+		httpTLSConfig, err = node_https.ConfigToTLSConfig(&cfg.HTTPTLSConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error generating http tls config: %v", err)
+		}
+	}
+	var grpcTLSConfig *tls.Config
+	if len(cfg.GRPCTLSConfig.TLSCertPath) > 0 && len(cfg.GRPCTLSConfig.TLSKeyPath) > 0 {
+		// Note: ConfigToTLSConfig from prometheus/node_exporter is awaiting security review.
+		grpcTLSConfig, err = node_https.ConfigToTLSConfig(&cfg.GRPCTLSConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error generating grpc tls config: %v", err)
+		}
 	}
 
 	// Prometheus histograms for requests.
@@ -106,13 +175,6 @@ func New(cfg Config) (*Server, error) {
 		Buckets:   instrument.DefBuckets,
 	}, []string{"method", "route", "status_code", "ws"})
 	prometheus.MustRegister(requestDuration)
-
-	// If user doesn't supply a logging implementation, by default instantiate
-	// logrus.
-	log := cfg.Log
-	if log == nil {
-		log = logging.NewLogrus(cfg.LogLevel)
-	}
 
 	log.WithField("http", httpListener.Addr()).WithField("grpc", grpcListener.Addr()).Infof("server listening on addresses")
 
@@ -135,6 +197,14 @@ func New(cfg Config) (*Server, error) {
 	}
 	grpcStreamMiddleware = append(grpcStreamMiddleware, cfg.GRPCStreamMiddleware...)
 
+	grpcKeepAliveOptions := keepalive.ServerParameters{
+		MaxConnectionIdle:     cfg.GRPCServerMaxConnectionIdle,
+		MaxConnectionAge:      cfg.GRPCServerMaxConnectionAge,
+		MaxConnectionAgeGrace: cfg.GRPCServerMaxConnectionAgeGrace,
+		Time:                  cfg.GRPCServerTime,
+		Timeout:               cfg.GRPCServerTimeout,
+	}
+
 	grpcOptions := []grpc.ServerOption{
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			grpcMiddleware...,
@@ -142,11 +212,16 @@ func New(cfg Config) (*Server, error) {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			grpcStreamMiddleware...,
 		)),
+		grpc.KeepaliveParams(grpcKeepAliveOptions),
 		grpc.MaxRecvMsgSize(cfg.GPRCServerMaxRecvMsgSize),
 		grpc.MaxSendMsgSize(cfg.GRPCServerMaxSendMsgSize),
 		grpc.MaxConcurrentStreams(uint32(cfg.GPRCServerMaxConcurrentStreams)),
 	}
 	grpcOptions = append(grpcOptions, cfg.GRPCOptions...)
+	if grpcTLSConfig != nil {
+		grpcCreds := credentials.NewTLS(grpcTLSConfig)
+		grpcOptions = append(grpcOptions, grpc.Creds(grpcCreds))
+	}
 	grpcServer := grpc.NewServer(grpcOptions...)
 
 	// Setup HTTP server
@@ -178,6 +253,9 @@ func New(cfg Config) (*Server, error) {
 		WriteTimeout: cfg.HTTPServerWriteTimeout,
 		IdleTimeout:  cfg.HTTPServerIdleTimeout,
 		Handler:      middleware.Merge(httpMiddleware...).Wrap(router),
+	}
+	if httpTLSConfig != nil {
+		httpServer.TLSConfig = httpTLSConfig
 	}
 
 	return &Server{
@@ -213,7 +291,12 @@ func (s *Server) Run() error {
 	}()
 
 	go func() {
-		err := s.HTTPServer.Serve(s.httpListener)
+		var err error
+		if s.HTTPServer.TLSConfig == nil {
+			err = s.HTTPServer.Serve(s.httpListener)
+		} else {
+			err = s.HTTPServer.ServeTLS(s.httpListener, s.cfg.HTTPTLSConfig.TLSCertPath, s.cfg.HTTPTLSConfig.TLSKeyPath)
+		}
 		if err == http.ErrServerClosed {
 			err = nil
 		}

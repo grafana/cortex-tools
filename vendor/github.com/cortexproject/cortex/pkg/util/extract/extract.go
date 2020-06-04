@@ -3,16 +3,19 @@ package extract
 import (
 	"fmt"
 
-	"github.com/cortexproject/cortex/pkg/ingester/client"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+
+	"github.com/cortexproject/cortex/pkg/ingester/client"
 )
 
 // MetricNameFromLabelAdapters extracts the metric name from a list of LabelPairs.
 func MetricNameFromLabelAdapters(labels []client.LabelAdapter) (string, error) {
 	for _, label := range labels {
 		if label.Name == model.MetricNameLabel {
-			return label.Value, nil
+			// Force a string copy since LabelAdapter is often a pointer into
+			// a large gRPC buffer which we don't want to keep alive on the heap.
+			return string([]byte(label.Value)), nil
 		}
 	}
 	return "", fmt.Errorf("No metric name label")

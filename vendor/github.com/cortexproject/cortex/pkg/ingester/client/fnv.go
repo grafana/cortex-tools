@@ -23,7 +23,7 @@ const (
 	prime32  = 16777619
 )
 
-// hashNew initializies a new fnv64a hash value.
+// hashNew initializes a new fnv64a hash value.
 func hashNew() uint64 {
 	return offset64
 }
@@ -66,5 +66,12 @@ func HashAdd32(h uint32, s string) uint32 {
 		h *= prime32
 		h ^= uint32(s[i])
 	}
+	return h
+}
+
+// HashAddByte32 adds a byte to a fnv32 hash value, returning the updated hash.
+func HashAddByte32(h uint32, b byte) uint32 {
+	h *= prime32
+	h ^= uint32(b)
 	return h
 }

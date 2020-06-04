@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-kit/kit/log/level"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
@@ -14,6 +16,7 @@ import (
 	"github.com/weaveworks/common/httpgrpc"
 
 	"github.com/cortexproject/cortex/pkg/chunk/cache"
+	"github.com/cortexproject/cortex/pkg/querier/astmapper"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
 )
@@ -58,41 +61,36 @@ var (
 		// For 100k series for 7 week, could be 1.2m - 10*(8^(7-1)) = 2.6m.
 		Buckets: prometheus.ExponentialBuckets(10, 8, 7),
 	})
+	dedupedChunksTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: "cortex",
+		Name:      "chunk_store_deduped_chunks_total",
+		Help:      "Count of chunks which were not stored because they have already been stored by another replica.",
+	})
 )
 
 // seriesStore implements Store
 type seriesStore struct {
-	store
+	baseStore
+	schema           SeriesStoreSchema
 	writeDedupeCache cache.Cache
 }
 
-func newSeriesStore(cfg StoreConfig, schema Schema, index IndexClient, chunks ObjectClient, limits StoreLimits) (Store, error) {
-	fetcher, err := NewChunkFetcher(cfg.ChunkCacheConfig, cfg.chunkCacheStubs, chunks)
-	if err != nil {
-		return nil, err
-	}
-
-	writeDedupeCache, err := cache.New(cfg.WriteDedupeCacheConfig)
+func newSeriesStore(cfg StoreConfig, schema SeriesStoreSchema, index IndexClient, chunks Client, limits StoreLimits, chunksCache, writeDedupeCache cache.Cache) (Store, error) {
+	rs, err := newBaseStore(cfg, schema, index, chunks, limits, chunksCache)
 	if err != nil {
 		return nil, err
 	}
 
 	if cfg.CacheLookupsOlderThan != 0 {
 		schema = &schemaCaching{
-			Schema:         schema,
-			cacheOlderThan: cfg.CacheLookupsOlderThan,
+			SeriesStoreSchema: schema,
+			cacheOlderThan:    time.Duration(cfg.CacheLookupsOlderThan),
 		}
 	}
 
 	return &seriesStore{
-		store: store{
-			cfg:     cfg,
-			index:   index,
-			chunks:  chunks,
-			schema:  schema,
-			limits:  limits,
-			Fetcher: fetcher,
-		},
+		baseStore:        rs,
+		schema:           schema,
 		writeDedupeCache: writeDedupeCache,
 	}, nil
 }
@@ -129,6 +127,15 @@ func (c *seriesStore) Get(ctx context.Context, userID string, from, through mode
 	if err != nil {
 		level.Error(log).Log("msg", "FetchChunks", "err", err)
 		return nil, err
+	}
+
+	// inject artificial __cortex_shard__ labels if present in the query. GetChunkRefs guarantees any chunk refs match the shard.
+	shard, _, err := astmapper.ShardFromMatchers(allMatchers)
+	if err != nil {
+		return nil, err
+	}
+	if shard != nil {
+		injectShardLabels(allChunks, *shard)
 	}
 
 	// Filter out chunks based on the empty matchers in the query.
@@ -177,7 +184,7 @@ func (c *seriesStore) GetChunkRefs(ctx context.Context, userID string, from, thr
 	level.Debug(log).Log("chunks-post-filtering", len(chunks))
 	chunksPerQuery.Observe(float64(len(chunks)))
 
-	return [][]Chunk{chunks}, []*Fetcher{c.store.Fetcher}, nil
+	return [][]Chunk{chunks}, []*Fetcher{c.baseStore.Fetcher}, nil
 }
 
 // LabelNamesForMetricName retrieves all label names for a metric name.
@@ -252,10 +259,21 @@ func (c *seriesStore) lookupSeriesByMetricNameMatchers(ctx context.Context, from
 	log, ctx := spanlogger.New(ctx, "SeriesStore.lookupSeriesByMetricNameMatchers", "metricName", metricName, "matchers", len(matchers))
 	defer log.Span.Finish()
 
+	// Check if one of the labels is a shard annotation, pass that information to lookupSeriesByMetricNameMatcher,
+	// and remove the label.
+	shard, shardLabelIndex, err := astmapper.ShardFromMatchers(matchers)
+	if err != nil {
+		return nil, err
+	}
+
+	if shard != nil {
+		matchers = append(matchers[:shardLabelIndex], matchers[shardLabelIndex+1:]...)
+	}
+
 	// Just get series for metric if there are no matchers
 	if len(matchers) == 0 {
 		indexLookupsPerQuery.Observe(1)
-		series, err := c.lookupSeriesByMetricNameMatcher(ctx, from, through, userID, metricName, nil)
+		series, err := c.lookupSeriesByMetricNameMatcher(ctx, from, through, userID, metricName, nil, shard)
 		if err != nil {
 			preIntersectionPerQuery.Observe(float64(len(series)))
 			postIntersectionPerQuery.Observe(float64(len(series)))
@@ -269,7 +287,7 @@ func (c *seriesStore) lookupSeriesByMetricNameMatchers(ctx context.Context, from
 	indexLookupsPerQuery.Observe(float64(len(matchers)))
 	for _, matcher := range matchers {
 		go func(matcher *labels.Matcher) {
-			ids, err := c.lookupSeriesByMetricNameMatcher(ctx, from, through, userID, metricName, matcher)
+			ids, err := c.lookupSeriesByMetricNameMatcher(ctx, from, through, userID, metricName, matcher, shard)
 			if err != nil {
 				incomingErrors <- err
 				return
@@ -320,44 +338,10 @@ func (c *seriesStore) lookupSeriesByMetricNameMatchers(ctx context.Context, from
 	return ids, nil
 }
 
-func (c *seriesStore) lookupSeriesByMetricNameMatcher(ctx context.Context, from, through model.Time, userID, metricName string, matcher *labels.Matcher) ([]string, error) {
-	log, ctx := spanlogger.New(ctx, "SeriesStore.lookupSeriesByMetricNameMatcher", "metricName", metricName, "matcher", matcher)
-	defer log.Span.Finish()
-
-	var err error
-	var queries []IndexQuery
-	var labelName string
-	if matcher == nil {
-		queries, err = c.schema.GetReadQueriesForMetric(from, through, userID, metricName)
-	} else if matcher.Type != labels.MatchEqual {
-		labelName = matcher.Name
-		queries, err = c.schema.GetReadQueriesForMetricLabel(from, through, userID, metricName, matcher.Name)
-	} else {
-		labelName = matcher.Name
-		queries, err = c.schema.GetReadQueriesForMetricLabelValue(from, through, userID, metricName, matcher.Name, matcher.Value)
-	}
-	if err != nil {
-		return nil, err
-	}
-	level.Debug(log).Log("queries", len(queries))
-
-	entries, err := c.lookupEntriesByQueries(ctx, queries)
-	if e, ok := err.(CardinalityExceededError); ok {
-		e.MetricName = metricName
-		e.LabelName = labelName
-		return nil, e
-	} else if err != nil {
-		return nil, err
-	}
-	level.Debug(log).Log("entries", len(entries))
-
-	ids, err := c.parseIndexEntries(ctx, entries, matcher)
-	if err != nil {
-		return nil, err
-	}
-	level.Debug(log).Log("ids", len(ids))
-
-	return ids, nil
+func (c *seriesStore) lookupSeriesByMetricNameMatcher(ctx context.Context, from, through model.Time, userID, metricName string, matcher *labels.Matcher, shard *astmapper.ShardAnnotation) ([]string, error) {
+	return c.lookupIdsByMetricNameMatcher(ctx, from, through, userID, metricName, matcher, func(queries []IndexQuery) []IndexQuery {
+		return c.schema.FilterReadQueries(queries, shard)
+	})
 }
 
 func (c *seriesStore) lookupChunksBySeries(ctx context.Context, from, through model.Time, userID string, seriesIDs []string) ([]string, error) {
@@ -431,9 +415,11 @@ func (c *seriesStore) Put(ctx context.Context, chunks []Chunk) error {
 
 // PutOne implements ChunkStore
 func (c *seriesStore) PutOne(ctx context.Context, from, through model.Time, chunk Chunk) error {
+	log, ctx := spanlogger.New(ctx, "SeriesStore.PutOne")
 	// If this chunk is in cache it must already be in the database so we don't need to write it again
 	found, _, _ := c.cache.Fetch(ctx, []string{chunk.ExternalKey()})
 	if len(found) > 0 {
+		dedupedChunksTotal.Inc()
 		return nil
 	}
 
@@ -457,7 +443,9 @@ func (c *seriesStore) PutOne(ctx context.Context, from, through model.Time, chun
 			return err
 		}
 	}
-	c.writeBackCache(ctx, chunks)
+	if cacheErr := c.writeBackCache(ctx, chunks); cacheErr != nil {
+		level.Warn(log).Log("msg", "could not store chunks in chunk cache", "err", cacheErr)
+	}
 
 	bufs := make([][]byte, len(keysToCache))
 	c.writeDedupeCache.Store(ctx, keysToCache, bufs)
@@ -508,4 +496,67 @@ func (c *seriesStore) calculateIndexEntries(ctx context.Context, from, through m
 	}
 
 	return result, missing, nil
+}
+
+func injectShardLabels(chunks []Chunk, shard astmapper.ShardAnnotation) {
+	for i, chunk := range chunks {
+		b := labels.NewBuilder(chunk.Metric)
+		l := shard.Label()
+		b.Set(l.Name, l.Value)
+		chunk.Metric = b.Labels()
+		chunks[i] = chunk
+	}
+}
+
+func (c *seriesStore) DeleteChunk(ctx context.Context, from, through model.Time, userID, chunkID string, metric labels.Labels, partiallyDeletedInterval *model.Interval) error {
+	metricName := metric.Get(model.MetricNameLabel)
+	if metricName == "" {
+		return ErrMetricNameLabelMissing
+	}
+
+	chunkWriteEntries, err := c.schema.GetChunkWriteEntries(from, through, userID, string(metricName), metric, chunkID)
+	if err != nil {
+		return errors.Wrapf(err, "when getting chunk index entries to delete for chunkID=%s", chunkID)
+	}
+
+	return c.deleteChunk(ctx, userID, chunkID, metric, chunkWriteEntries, partiallyDeletedInterval, func(chunk Chunk) error {
+		return c.PutOne(ctx, chunk.From, chunk.Through, chunk)
+	})
+}
+
+func (c *seriesStore) DeleteSeriesIDs(ctx context.Context, from, through model.Time, userID string, metric labels.Labels) error {
+
+	entries, err := c.schema.GetSeriesDeleteEntries(from, through, userID, metric, func(userID, seriesID string, from, through model.Time) (b bool, e error) {
+		return c.hasChunksForInterval(ctx, userID, seriesID, from, through)
+	})
+	if err != nil {
+		return err
+	}
+
+	batch := c.index.NewWriteBatch()
+	for i := range entries {
+		batch.Delete(entries[i].TableName, entries[i].HashValue, entries[i].RangeValue)
+	}
+
+	return c.index.BatchWrite(ctx, batch)
+}
+
+func (c *seriesStore) hasChunksForInterval(ctx context.Context, userID, seriesID string, from, through model.Time) (bool, error) {
+	chunkIDs, err := c.lookupChunksBySeries(ctx, from, through, userID, []string{seriesID})
+	if err != nil {
+		return false, err
+	}
+
+	chunks, err := c.convertChunkIDsToChunks(ctx, userID, chunkIDs)
+	if err != nil {
+		return false, err
+	}
+
+	for _, chunk := range chunks {
+		if intervalsOverlap(model.Interval{Start: from, End: through}, model.Interval{Start: chunk.From, End: chunk.Through}) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
