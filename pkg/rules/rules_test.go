@@ -155,3 +155,43 @@ func TestLintPromQLExpressions(t *testing.T) {
 		})
 	}
 }
+
+func TestLintRecordingRules(t *testing.T) {
+	tt := []struct {
+		name     string
+		ruleName string
+		count    int
+	}{
+		{
+			name:     "follows rule name conventions",
+			ruleName: "level:metric:operation",
+			count:    0,
+		},
+		{
+			name:     "doesn't follow rule name conventions",
+			ruleName: "level_metric_operation",
+			count:    1,
+		},
+		{
+			name:     "almost follows rule name conventions",
+			ruleName: "level:metric_operation",
+			count:    1,
+		},
+		{
+			name:     "follows rule name conventions extra",
+			ruleName: "level:metric:something_else:operation",
+			count:    0,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			r := RuleNamespace{Groups: []rulefmt.RuleGroup{{Rules: []rulefmt.Rule{
+				{Record: tc.ruleName, Expr: "rate(some_metric_total)[5m]"},
+			}}}}
+
+			n := r.LintRecordingRules()
+			require.Equal(t, tc.count, n)
+		})
+	}
+}
