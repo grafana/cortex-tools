@@ -51,18 +51,22 @@ func (r RuleNamespace) LintPromQLExpressions() (int, int, error) {
 	return count, mod, nil
 }
 
-// LintRecordingRules checks that recording rules have at least one colon in their name, this is based
+// CheckRecordingRules checks that recording rules have at least one colon in their name, this is based
 // on the recording rules best practices here: https://prometheus.io/docs/practices/rules/
 // Returns the number of rules that don't match the requirements, and error if that number is not 0.
-func (r RuleNamespace) LintRecordingRules() int {
+func (r RuleNamespace) CheckRecordingRules(strict bool) int {
 	var name string
 	var count int
+	reqChunks := 2
+	if strict {
+		reqChunks = 3
+	}
 	for _, group := range r.Groups {
 		for _, rule := range group.Rules {
-			name = getRuleName(rule)
+			name = rule.Record
 			log.WithFields(log.Fields{"rule": name}).Debugf("linting recording rule name")
 			chunks := strings.Split(name, ":")
-			if len(chunks) < 3 {
+			if len(chunks) < reqChunks {
 				count++
 				log.WithFields(log.Fields{
 					"rule":      getRuleName(rule),
@@ -70,7 +74,6 @@ func (r RuleNamespace) LintRecordingRules() int {
 					"file":      r.Filepath,
 					"error":     "recording rule name does not match level:metric:operation format, must contain at least one colon",
 				}).Errorf("bad recording rule name")
-				// return fmt.Errorf("recording rule name %s does not match level:metric:operation format\n", name)
 			}
 		}
 	}

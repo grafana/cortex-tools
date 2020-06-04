@@ -156,11 +156,12 @@ func TestLintPromQLExpressions(t *testing.T) {
 	}
 }
 
-func TestLintRecordingRules(t *testing.T) {
+func TestCheckRecordingRules(t *testing.T) {
 	tt := []struct {
 		name     string
 		ruleName string
 		count    int
+		strict   bool
 	}{
 		{
 			name:     "follows rule name conventions",
@@ -176,6 +177,12 @@ func TestLintRecordingRules(t *testing.T) {
 			name:     "almost follows rule name conventions",
 			ruleName: "level:metric_operation",
 			count:    1,
+			strict:   true,
+		},
+		{
+			name:     "almost follows rule name conventions",
+			ruleName: "level:metric_operation",
+			count:    0,
 		},
 		{
 			name:     "follows rule name conventions extra",
@@ -190,8 +197,8 @@ func TestLintRecordingRules(t *testing.T) {
 				{Record: tc.ruleName, Expr: "rate(some_metric_total)[5m]"},
 			}}}}
 
-			n := r.LintRecordingRules()
-			require.Equal(t, tc.count, n)
+			n := r.CheckRecordingRules(tc.strict)
+			require.Equal(t, tc.count, n, "failed rule: %s", tc.ruleName)
 		})
 	}
 }
