@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	rulefmt "github.com/cortexproject/cortex/pkg/ruler/legacy_rulefmt"
+	promql "github.com/grafana/cortex/pkg/configs/legacy_promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	log "github.com/sirupsen/logrus"
 )
@@ -125,11 +126,25 @@ func (r RuleNamespace) AggregateBy(label string) (int, int, error) {
 // It modifies most PromQL aggregations to include a given label.
 func exprNodeInspectorFunc(rule rulefmt.Rule, label string) func(node parser.Node, path []parser.Node) error {
 	return func(node parser.Node, path []parser.Node) error {
-		aggregation, ok := node.(*parser.AggregateExpr)
-		if !ok {
+		var aggregation *promql.AggregateExpr
+		switch n := node.(type) {
+		case *promql.AggregateExpr:
+			aggregation = n
+		case *promql.BinaryExpr:
+			if n.VectorMatching != nil {
+				if n.VectorMatching.On {
+					for _, lbl := range n.VectorMatching.MatchingLabels {
+						if lbl == label {
+							return nil
+						}
+					}
+					n.VectorMatching.MatchingLabels = append(n.VectorMatching.MatchingLabels, label)
+				}
+			}
+			return nil
+		default:
 			return nil
 		}
-
 		// If the aggregation is about dropping labels (e.g. without), we don't want to modify
 		// this expression. Omission as long as it is not the cluster label will include it.
 		// TODO: We probably want to check whenever the label we're trying to include is included in the omission.
