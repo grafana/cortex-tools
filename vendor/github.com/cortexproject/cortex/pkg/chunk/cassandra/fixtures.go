@@ -6,6 +6,7 @@ import (
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/chunk/testutils"
+	"github.com/cortexproject/cortex/pkg/util/flagext"
 )
 
 // GOCQL doesn't provide nice mocks, so we use a real Cassandra instance.
@@ -16,7 +17,7 @@ import (
 type fixture struct {
 	name         string
 	indexClient  chunk.IndexClient
-	objectClient chunk.ObjectClient
+	objectClient chunk.Client
 	tableClient  chunk.TableClient
 	schemaConfig chunk.SchemaConfig
 }
@@ -25,7 +26,7 @@ func (f fixture) Name() string {
 	return f.name
 }
 
-func (f fixture) Clients() (chunk.IndexClient, chunk.ObjectClient, chunk.TableClient, chunk.SchemaConfig, error) {
+func (f fixture) Clients() (chunk.IndexClient, chunk.Client, chunk.TableClient, chunk.SchemaConfig, error) {
 	return f.indexClient, f.objectClient, f.tableClient, f.schemaConfig, nil
 }
 
@@ -40,12 +41,12 @@ func Fixtures() ([]testutils.Fixture, error) {
 		return nil, nil
 	}
 
-	cfg := Config{
-		Addresses:         addresses,
-		Keyspace:          "test",
-		Consistency:       "QUORUM",
-		ReplicationFactor: 1,
-	}
+	var cfg Config
+	flagext.DefaultValues(&cfg)
+	cfg.Addresses = addresses
+	cfg.Keyspace = "test"
+	cfg.Consistency = "QUORUM"
+	cfg.ReplicationFactor = 1
 
 	// Get a SchemaConfig with the defaults.
 	schemaConfig := testutils.DefaultSchemaConfig("cassandra")

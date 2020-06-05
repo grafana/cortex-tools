@@ -26,11 +26,13 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
 
+	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -40,10 +42,10 @@ var userAgent = fmt.Sprintf("Prometheus/%s", version.Version)
 
 // Client allows reading and writing from/to a remote HTTP endpoint.
 type Client struct {
-	index   int // Used to differentiate clients in metrics.
-	url     *config_util.URL
-	client  *http.Client
-	timeout time.Duration
+	remoteName string // Used to differentiate clients in metrics.
+	url        *config_util.URL
+	client     *http.Client
+	timeout    time.Duration
 }
 
 // ClientConfig configures a Client.
@@ -54,17 +56,22 @@ type ClientConfig struct {
 }
 
 // NewClient creates a new Client.
-func NewClient(index int, conf *ClientConfig) (*Client, error) {
+func NewClient(remoteName string, conf *ClientConfig) (*Client, error) {
 	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "remote_storage", false)
 	if err != nil {
 		return nil, err
 	}
 
+	t := httpClient.Transport
+	httpClient.Transport = &nethttp.Transport{
+		RoundTripper: t,
+	}
+
 	return &Client{
-		index:   index,
-		url:     conf.URL,
-		client:  httpClient,
-		timeout: time.Duration(conf.Timeout),
+		remoteName: remoteName,
+		url:        conf.URL,
+		client:     httpClient,
+		timeout:    time.Duration(conf.Timeout),
 	}, nil
 }
 
@@ -77,7 +84,7 @@ type recoverableError struct {
 func (c *Client) Store(ctx context.Context, req []byte) error {
 	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(req))
 	if err != nil {
-		// Errors from NewRequest are from unparseable URLs, so are not
+		// Errors from NewRequest are from unparsable URLs, so are not
 		// recoverable.
 		return err
 	}
@@ -85,12 +92,23 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", userAgent)
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
-	httpReq = httpReq.WithContext(ctx)
-
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
+	httpReq = httpReq.WithContext(ctx)
+
+	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
+		var ht *nethttp.Tracer
+		httpReq, ht = nethttp.TraceRequest(
+			parentSpan.Tracer(),
+			httpReq,
+			nethttp.OperationName("Remote Store"),
+			nethttp.ClientTrace(false),
+		)
+		defer ht.Finish()
+	}
+
+	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
 		// Errors from client.Do are from (for example) network errors, so are
 		// recoverable.
@@ -115,9 +133,14 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 	return err
 }
 
-// Name identifies the client.
+// Name uniquely identifies the client.
 func (c Client) Name() string {
-	return fmt.Sprintf("%d:%s", c.index, c.url)
+	return c.remoteName
+}
+
+// Endpoint is the remote read or write endpoint.
+func (c Client) Endpoint() string {
+	return c.url.String()
 }
 
 // Read reads from a remote endpoint.
@@ -148,7 +171,20 @@ func (c *Client) Read(ctx context.Context, query *prompb.Query) (*prompb.QueryRe
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
+	httpReq = httpReq.WithContext(ctx)
+
+	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
+		var ht *nethttp.Tracer
+		httpReq, ht = nethttp.TraceRequest(
+			parentSpan.Tracer(),
+			httpReq,
+			nethttp.OperationName("Remote Read"),
+			nethttp.ClientTrace(false),
+		)
+		defer ht.Finish()
+	}
+
+	httpResp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, errors.Wrap(err, "error sending request")
 	}
