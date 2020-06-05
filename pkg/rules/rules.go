@@ -63,6 +63,10 @@ func (r RuleNamespace) CheckRecordingRules(strict bool) int {
 	}
 	for _, group := range r.Groups {
 		for _, rule := range group.Rules {
+			// Assume if there is a rule.Record that this is a recording rule.
+			if rule.Record == "" {
+				continue
+			}
 			name = rule.Record
 			log.WithFields(log.Fields{"rule": name}).Debugf("linting recording rule name")
 			chunks := strings.Split(name, ":")
