@@ -93,7 +93,7 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	writeClient, err := remote.NewClient(0, &remote.ClientConfig{
+	writeClient, err := remote.NewClient("loadgen", &remote.ClientConfig{
 		URL:     &config.URL{URL: writeURL},
 		Timeout: model.Duration(c.writeTimeout),
 	})
