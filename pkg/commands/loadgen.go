@@ -117,7 +117,7 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		if err != nil {
 			logrus.WithError(err).Errorln("metrics listener failed")
 		}
-	}
+	}()
 
 	c.wg.Add(c.parallelism)
 	c.wg.Add(c.queryParallelism)
