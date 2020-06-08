@@ -142,7 +142,7 @@ func TestLintPromQLExpressions(t *testing.T) {
 			expr:     "it fails",
 			expected: "it fails",
 			count:    0, modified: 0,
-			err: "1:4: parse error: unexpected identifier \"fails\"",
+			err: "parse error at char 4: could not parse remaining input \"fails\"...",
 		},
 	}
 

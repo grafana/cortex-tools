@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	promql "github.com/cortexproject/cortex/pkg/configs/legacy_promql"
 	rulefmt "github.com/cortexproject/cortex/pkg/ruler/legacy_rulefmt"
-	promql "github.com/grafana/cortex/pkg/configs/legacy_promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	log "github.com/sirupsen/logrus"
 )
@@ -30,7 +30,7 @@ func (r RuleNamespace) LintPromQLExpressions() (int, int, error) {
 	for i, group := range r.Groups {
 		for j, rule := range group.Rules {
 			log.WithFields(log.Fields{"rule": getRuleName(rule)}).Debugf("linting PromQL")
-			exp, err := parser.ParseExpr(rule.Expr)
+			exp, err := promql.ParseExpr(rule.Expr)
 			if err != nil {
 				return count, mod, err
 			}
@@ -128,9 +128,9 @@ func exprNodeInspectorFunc(rule rulefmt.Rule, label string) func(node parser.Nod
 	return func(node parser.Node, path []parser.Node) error {
 		var err error
 		switch n := node.(type) {
-		case *promql.AggregateExpr:
+		case *parser.AggregateExpr:
 			err = prepareAggregationExpr(n, label, getRuleName(rule))
-		case *promql.BinaryExpr:
+		case *parser.BinaryExpr:
 			err = prepareBinaryExpr(n, label, getRuleName(rule))
 		default:
 			return err
@@ -140,7 +140,7 @@ func exprNodeInspectorFunc(rule rulefmt.Rule, label string) func(node parser.Nod
 	}
 }
 
-func prepareAggregationExpr(e *promql.AggregateExpr, label string, ruleName string) error {
+func prepareAggregationExpr(e *parser.AggregateExpr, label string, ruleName string) error {
 	// If the aggregation is about dropping labels (e.g. without), we don't want to modify
 	// this expression. Omission as long as it is not the cluster label will include it.
 	// TODO: We probably want to check whenever the label we're trying to include is included in the omission.
@@ -163,7 +163,7 @@ func prepareAggregationExpr(e *promql.AggregateExpr, label string, ruleName stri
 	return nil
 }
 
-func prepareBinaryExpr(e *promql.BinaryExpr, label string, rule string) error {
+func prepareBinaryExpr(e *parser.BinaryExpr, label string, rule string) error {
 	if e.VectorMatching == nil {
 		return nil
 	}
