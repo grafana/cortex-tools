@@ -123,48 +123,68 @@ func (r RuleNamespace) AggregateBy(label string) (int, int, error) {
 }
 
 // exprNodeInspectorFunc returns a PromQL inspector.
-// It modifies most PromQL aggregations to include a given label.
+// It modifies most PromQL expressions to include a given label.
 func exprNodeInspectorFunc(rule rulefmt.Rule, label string) func(node parser.Node, path []parser.Node) error {
 	return func(node parser.Node, path []parser.Node) error {
-		var aggregation *promql.AggregateExpr
+		var err error
 		switch n := node.(type) {
 		case *promql.AggregateExpr:
-			aggregation = n
+			err = prepareAggregationExpr(n, label, getRuleName(rule))
 		case *promql.BinaryExpr:
-			if n.VectorMatching != nil {
-				if n.VectorMatching.On {
-					for _, lbl := range n.VectorMatching.MatchingLabels {
-						if lbl == label {
-							return nil
-						}
-					}
-					n.VectorMatching.MatchingLabels = append(n.VectorMatching.MatchingLabels, label)
-				}
-			}
-			return nil
+			err = prepareBinaryExpr(n, label, getRuleName(rule))
 		default:
-			return nil
-		}
-		// If the aggregation is about dropping labels (e.g. without), we don't want to modify
-		// this expression. Omission as long as it is not the cluster label will include it.
-		// TODO: We probably want to check whenever the label we're trying to include is included in the omission.
-		if aggregation.Without {
-			return nil
+			return err
 		}
 
-		for _, lbl := range aggregation.Grouping {
-			if lbl == label {
-				return nil
-			}
-		}
+		return err
+	}
+}
 
-		log.WithFields(
-			log.Fields{"rule": getRuleName(rule), "lbls": strings.Join(aggregation.Grouping, ", ")},
-		).Debugf("aggregation without '%s' label, adding.", label)
-
-		aggregation.Grouping = append(aggregation.Grouping, label)
+func prepareAggregationExpr(e *promql.AggregateExpr, label string, ruleName string) error {
+	// If the aggregation is about dropping labels (e.g. without), we don't want to modify
+	// this expression. Omission as long as it is not the cluster label will include it.
+	// TODO: We probably want to check whenever the label we're trying to include is included in the omission.
+	if e.Without {
 		return nil
 	}
+
+	for _, lbl := range e.Grouping {
+		// It already has the label we want to aggregate by.
+		if lbl == label {
+			return nil
+		}
+	}
+
+	log.WithFields(
+		log.Fields{"rule": ruleName, "lbls": strings.Join(e.Grouping, ", ")},
+	).Debugf("aggregation without '%s' label, adding.", label)
+
+	e.Grouping = append(e.Grouping, label)
+	return nil
+}
+
+func prepareBinaryExpr(e *promql.BinaryExpr, label string, rule string) error {
+	if e.VectorMatching == nil {
+		return nil
+	}
+
+	if !e.VectorMatching.On {
+		return nil
+	}
+
+	for _, lbl := range e.VectorMatching.MatchingLabels {
+		// It already has the label we want to add in the expression.
+		if lbl == label {
+			return nil
+		}
+	}
+
+	log.WithFields(
+		log.Fields{"rule": rule, "lbls": strings.Join(e.VectorMatching.MatchingLabels, ", ")},
+	).Debugf("binary expression without '%s' label, adding.", label)
+
+	e.VectorMatching.MatchingLabels = append(e.VectorMatching.MatchingLabels, label)
+	return nil
 }
 
 // Validate each rule in the rule namespace is valid

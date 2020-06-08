@@ -22,7 +22,7 @@ func TestAggregateBy(t *testing.T) {
 			count: 0, modified: 0, expect: nil,
 		},
 		{
-			name: "no modifcation",
+			name: "no modification",
 			rn: RuleNamespace{
 				Groups: []rulefmt.RuleGroup{{Name: "WithoutAggregation", Rules: []rulefmt.Rule{
 					{Alert: "WithoutAggregation", Expr: "up != 1"},
