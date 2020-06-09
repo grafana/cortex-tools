@@ -2,6 +2,8 @@
 
 ## unreleased / master
 
+## v0.2.2 / 2020-06-09
+
 * [BUGFIX] Fix usage of the old PromQL parser in `prepare lint`.
 
 ## v0.2.1 / 2020-06-08
