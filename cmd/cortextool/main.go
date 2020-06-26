@@ -27,4 +27,17 @@ func main() {
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	pushGateway.Stop()
+	// cli.GetAlertmanagerURL()
+
+	// amcli := cli.NewAlertmanagerClient(&url.URL{
+	// 	Host: "localhost:8080",
+	// 	Path: "alertmanager",
+	// })
+
+	// groups, _ := amcli.Alertgroup.GetAlertGroups(nil)
+	// for _, group := range groups.Payload {
+	// 	if len(group.Alerts)%2 != 0 && !strings.Contains(group.Labels["cluster"], "agent") {
+	// 		fmt.Printf("%+v, %+v\n", group.Labels["alertname"], group.Labels)
+	// 	}
+	// }
 }
