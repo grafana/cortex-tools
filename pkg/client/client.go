@@ -2,6 +2,8 @@ package client
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -18,9 +20,12 @@ var (
 
 // Config is used to configure a Ruler Client
 type Config struct {
-	Key     string `yaml:"key"`
-	Address string `yaml:"address"`
-	ID      string `yaml:"id"`
+	Key         string `yaml:"key"`
+	Address     string `yaml:"address"`
+	ID          string `yaml:"id"`
+	TLScaFile   string `yaml:"tls_ca"`
+	TLScertFile string `yaml:"tls_cert"`
+	TLSkeyFile  string `yaml:"tls_key"`
 }
 
 // CortexClient is used to get and load rules into a cortex ruler
@@ -43,6 +48,42 @@ func New(cfg Config) (*CortexClient, error) {
 		"id":      cfg.ID,
 	}).Debugln("New ruler client created")
 
+	//if TLS flags, setup http client
+	if cfg.TLScaFile != "" && cfg.TLScertFile != "" && cfg.TLSkeyFile != "" {
+
+		// Load client cert
+		cert, err := tls.LoadX509KeyPair(cfg.TLScertFile, cfg.TLSkeyFile)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"tls-cert": cfg.TLScertFile,
+				"tls-key":  cfg.TLSkeyFile,
+			}).Fatal(err)
+		}
+
+		// Load CA cert
+		caCert, err := ioutil.ReadFile(cfg.TLScaFile)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"tls-ca": cfg.TLScaFile,
+			}).Fatal(err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+
+		// Setup HTTPS client
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			RootCAs:      caCertPool,
+		}
+		tlsConfig.BuildNameToCertificate()
+		transport := &http.Transport{TLSClientConfig: tlsConfig}
+		return &CortexClient{
+			key:      cfg.Key,
+			id:       cfg.ID,
+			endpoint: endpoint,
+			client:   http.Client{Transport: transport},
+		}, nil
+	}
 	return &CortexClient{
 		key:      cfg.Key,
 		id:       cfg.ID,
