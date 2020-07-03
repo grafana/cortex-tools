@@ -199,6 +199,6 @@ func (a *AlertCommand) verifyConfig(k *kingpin.ParseContext) error {
 			}).Infof("bad alert")
 		}
 	}
-
+	log.WithFields(log.Fields{"count": len(data.Data.Result)}).Infof("found mismatching alerts")
 	return nil
 }
