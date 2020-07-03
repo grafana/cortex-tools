@@ -121,17 +121,17 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 		c.Flag("tls-ca-cert", "TLS CA certificate to verify cortex API as part of mTLS, alternatively set CORTEX_TLS_CA_CERT.").
 			Default("").
 			Envar("CORTEX_TLS_CA_CERT").
-			StringVar(&r.ClientConfig.TLScaFile)
+			StringVar(&r.ClientConfig.TLS.CAPath)
 
 		c.Flag("tls-cert", "TLS client certificate to authenticate with cortex API as part of mTLS, alternatively set CORTEX_TLS_CLIENT_CERT.").
 			Default("").
 			Envar("CORTEX_TLS_CLIENT_CERT").
-			StringVar(&r.ClientConfig.TLScertFile)
+			StringVar(&r.ClientConfig.TLS.CertPath)
 
 		c.Flag("tls-key", "TLS client certificate private key to authenticate with cortex API as part of mTLS, alternatively set CORTEX_TLS_CLIENT_KEY.").
 			Default("").
 			Envar("CORTEX_TLS_CLIENT_KEY").
-			StringVar(&r.ClientConfig.TLSkeyFile)
+			StringVar(&r.ClientConfig.TLS.KeyPath)
 
 	}
 
