@@ -6,18 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	// "fmt"
 	"io/ioutil"
 	"net/url"
 
-	// "strings"
-	// "time"
-
 	"github.com/pkg/errors"
-
-	// amClient "github.com/prometheus/alertmanager/api/v2/client"
-
-	// amCli "github.com/prometheus/alertmanager/cli"
 
 	"github.com/prometheus/alertmanager/config"
 
@@ -132,7 +124,7 @@ func (a *AlertCommand) Register(app *kingpin.Application) {
 	alertCmd.Flag("id", "Cortex tenant id, alternatively set CORTEX_TENANT_ID.").Envar("CORTEX_TENANT_ID").Required().StringVar(&a.ClientConfig.ID)
 	alertCmd.Flag("key", "Api key to use when contacting cortex, alternatively set CORTEX_API_KEY.").Default("").Envar("CORTEX_API_KEY").StringVar(&a.ClientConfig.Key)
 
-	verifyAlertsCmd := alertCmd.Command("verify", "Verifies alerts in an alertmanager cluster are deduplicated; useful for verifying correct configuration when transfering from Prometheus to Cortex alert evaluation.").Action(a.verifyConfig)
+	verifyAlertsCmd := alertCmd.Command("verify", "Verifies alerts in an alertmanager cluster are deduplicated; useful for verifying correct configuration when transferring from Prometheus to Cortex alert evaluation.").Action(a.verifyConfig)
 	verifyAlertsCmd.Flag("ignore-alerts", "A comma separated list of Alert names to ignore in deduplication checks.").StringVar(&a.IgnoreString)
 	verifyAlertsCmd.Flag("source-label", "Label to look for when deciding if two alerts are duplicates of eachother from separate sources.").Default("ruler").StringVar(&a.SourceLabel)
 	verifyAlertsCmd.Flag("grace-period", "Grace period, don't consider alert groups with the incorrect amount of alert replicas erroneous unless the alerts have existed for more than this amount of time, in minutes.").Default("5").IntVar(&a.GracePeriod)
@@ -182,17 +174,17 @@ func (a *AlertCommand) verifyConfig(k *kingpin.ParseContext) error {
 		a.GracePeriod,
 		a.SourceLabel)
 	res, err := a.cli.Query(context.Background(), fmt.Sprintf("%s or %s", lhs, rhs))
-	defer res.Body.Close()
 
 	if err != nil {
 		return err
 	}
 
 	body, err := ioutil.ReadAll(res.Body)
-
 	if err != nil {
 		return err
 	}
+	defer res.Body.Close()
+
 	var data queryResult
 	err = json.Unmarshal(body, &data)
 	if err != nil {
