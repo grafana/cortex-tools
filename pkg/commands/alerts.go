@@ -193,7 +193,10 @@ func (a *AlertCommand) verifyConfig(k *kingpin.ParseContext) error {
 
 	for _, m := range data.Data.Result {
 		if _, ok := a.IgnoreAlerts[m.Metric["alertname"]]; !ok {
-			log.Infof("bad alert: %s, %+v", m.Metric["alertname"], m.Metric)
+			log.WithFields(log.Fields{
+				"alertname": m.Metric["alertname"],
+				"state":     m.Metric,
+			}).Infof("bad alert")
 		}
 	}
 
