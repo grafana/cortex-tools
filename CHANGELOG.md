@@ -3,6 +3,10 @@
 ## unreleased / master
 
 * [BUGFIX] When using `--disable-color` for `rules get`, it now actually prints rules instead of the bytes of the underlying string
+* [ENHANCEMENT] Allow mutualTLS for Cortex API client for `rules` and `alertmanager` cmds with:
+  - `--tls-ca-path` or `CORTEX_TLS_CA_PATH`
+  - `--tls-cert-path` or `CORTEX_TLS_CERT_PATH`
+  - `--tls-key-path` or `CORTEX_TLS_KEY_PATH`
 
 ## v0.2.2 / 2020-06-09
 
