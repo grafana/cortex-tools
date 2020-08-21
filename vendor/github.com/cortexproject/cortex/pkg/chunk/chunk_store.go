@@ -63,9 +63,8 @@ type StoreConfig struct {
 	// is set, use different caches for ingesters and queriers.
 	chunkCacheStubs bool // don't write the full chunk to cache, just a stub entry
 
-	// When DisableChunksDeduplication is true, cache would not be checked for whether chunk is already written.
-	// It would still write the chunk back to cache for reads.
-	DisableChunksDeduplication bool `yaml:"-"`
+	// When DisableIndexDeduplication is true and chunk is already there in cache, only index would be written to the store and not chunk.
+	DisableIndexDeduplication bool `yaml:"-"`
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet
@@ -425,11 +424,13 @@ func (c *store) lookupChunksByMetricName(ctx context.Context, userID string, fro
 	// Receive chunkSets from all matchers
 	var chunkIDs []string
 	var lastErr error
+	var initialized bool
 	for i := 0; i < len(matchers); i++ {
 		select {
 		case incoming := <-incomingChunkIDs:
-			if chunkIDs == nil {
+			if !initialized {
 				chunkIDs = incoming
+				initialized = true
 			} else {
 				chunkIDs = intersectStrings(chunkIDs, incoming)
 			}
@@ -505,6 +506,11 @@ func (c *baseStore) lookupEntriesByQueries(ctx context.Context, queries []IndexQ
 	log, ctx := spanlogger.New(ctx, "store.lookupEntriesByQueries")
 	defer log.Span.Finish()
 
+	// Nothing to do if there are no queries.
+	if len(queries) == 0 {
+		return nil, nil
+	}
+
 	var lock sync.Mutex
 	var entries []IndexEntry
 	err := c.index.QueryPages(ctx, queries, func(query IndexQuery, resp ReadBatch) bool {
@@ -527,7 +533,12 @@ func (c *baseStore) lookupEntriesByQueries(ctx context.Context, queries []IndexQ
 	return entries, err
 }
 
-func (c *baseStore) parseIndexEntries(ctx context.Context, entries []IndexEntry, matcher *labels.Matcher) ([]string, error) {
+func (c *baseStore) parseIndexEntries(_ context.Context, entries []IndexEntry, matcher *labels.Matcher) ([]string, error) {
+	// Nothing to do if there are no entries.
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
 	result := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		chunkKey, labelValue, _, err := parseChunkTimeRangeValue(entry.RangeValue, entry.Value)
