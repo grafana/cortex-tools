@@ -52,3 +52,8 @@ clean:
 	rm -rf cmd/cortextool/cortextool
 	rm -rf cmd/chunktool/chunktool
 	rm -rf cmd/logtool/logtool
+
+# CI
+.drone/drone.yml: .drone/drone.jsonnet
+	drone jsonnet --source $< --target $@ --stream --format=false
+	drone lint $@

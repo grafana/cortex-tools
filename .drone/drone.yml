@@ -1,0 +1,42 @@
+---
+{
+   "kind": "pipeline",
+   "name": "validate-pull-request",
+   "steps": [
+      {
+         "commands": [
+            "apk add --no-cache bash git",
+            "git fetch origin --tags",
+            "echo $(./tools/image-tag)  > .tags"
+         ],
+         "image": "alpine",
+         "name": "image-tag"
+      },
+      {
+         "commands": [
+            "make lint"
+         ],
+         "image": "golang:1.14.8-stretch",
+         "name": "make-lint"
+      },
+      {
+         "commands": [
+            "make test"
+         ],
+         "image": "golang:1.14.8-stretch",
+         "name": "make-test"
+      },
+      {
+         "commands": [
+            "make all"
+         ],
+         "image": "golang:1.14.8-stretch",
+         "name": "make-all"
+      }
+   ],
+   "trigger": {
+      "event": [
+         "pull_request"
+      ]
+   }
+}
