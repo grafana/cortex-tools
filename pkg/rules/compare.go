@@ -9,6 +9,8 @@ import (
 	"github.com/mitchellh/colorstring"
 	"github.com/prometheus/prometheus/pkg/rulefmt"
 	yaml "gopkg.in/yaml.v3"
+
+	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 )
 
 var (
@@ -38,8 +40,8 @@ type NamespaceChange struct {
 	Namespace     string
 	State         NamespaceState
 	GroupsUpdated []UpdatedRuleGroup
-	GroupsCreated []rulefmt.RuleGroup
-	GroupsDeleted []rulefmt.RuleGroup
+	GroupsCreated []rwrulefmt.RuleGroup
+	GroupsDeleted []rwrulefmt.RuleGroup
 }
 
 // SummarizeChanges returns the number of each type of change in a set of changes
@@ -61,12 +63,12 @@ func SummarizeChanges(changes []NamespaceChange) (created, updated, deleted int)
 
 // UpdatedRuleGroup is used to store an change between a rule group
 type UpdatedRuleGroup struct {
-	New      rulefmt.RuleGroup
-	Original rulefmt.RuleGroup
+	New      rwrulefmt.RuleGroup
+	Original rwrulefmt.RuleGroup
 }
 
 // CompareGroups differentiates between two rule groups
-func CompareGroups(groupOne, groupTwo rulefmt.RuleGroup) error {
+func CompareGroups(groupOne, groupTwo rwrulefmt.RuleGroup) error {
 	if groupOne.Name != groupTwo.Name {
 		return errNameDiff
 	}
@@ -123,11 +125,11 @@ func CompareNamespaces(original, new RuleNamespace) NamespaceChange {
 		Namespace:     new.Namespace,
 		State:         Unchanged,
 		GroupsUpdated: []UpdatedRuleGroup{},
-		GroupsCreated: []rulefmt.RuleGroup{},
-		GroupsDeleted: []rulefmt.RuleGroup{},
+		GroupsCreated: []rwrulefmt.RuleGroup{},
+		GroupsDeleted: []rwrulefmt.RuleGroup{},
 	}
 
-	origMap := map[string]rulefmt.RuleGroup{}
+	origMap := map[string]rwrulefmt.RuleGroup{}
 	for _, g := range original.Groups {
 		origMap[g.Name] = g
 	}
