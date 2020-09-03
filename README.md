@@ -1,5 +1,7 @@
 # Cortex Tools
 
+[![Build Status](https://drone.grafana.net/api/badges/grafana/cortex-tools/status.svg)](https://drone.grafana.net/grafana/cortex-tools)
+
 This repo contains tools used for interacting with [Cortex](https://github.com/cortexproject/cortex).
 
 * [cortextool](#cortextool): Interacts with user-facing Cortex APIs and backend storage components
