@@ -12,6 +12,7 @@ require (
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
 	github.com/google/go-cmp v0.4.0
+	github.com/google/go-github/v32 v32.1.0
 	github.com/grafana/loki v1.6.2-0.20200831213751-f905e77259f2
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.2.0
