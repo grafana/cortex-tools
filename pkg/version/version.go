@@ -21,7 +21,7 @@ func CheckLatest() {
 		latest := getLatestFromGitHub()
 		version := Version
 		if latest != "" && (strings.TrimPrefix(latest, "v") != strings.TrimPrefix(version, "v")) {
-			fmt.Println(fmt.Sprintf("A newer version of cortextool is available, please update to %s", latest))
+			fmt.Printf("A newer version of cortextool is available, please update to %s\n", latest)
 		} else {
 			fmt.Println("You are on the latest version")
 		}
