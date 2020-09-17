@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	errNameDiff     = errors.New("rule groups are named differently")
-	errIntervalDiff = errors.New("rule groups have different intervals")
-	errDiffRuleLen  = errors.New("rule groups have a different number of rules")
+	errNameDiff      = errors.New("rule groups are named differently")
+	errIntervalDiff  = errors.New("rule groups have different intervals")
+	errDiffRuleLen   = errors.New("rule groups have a different number of rules")
+	errDiffRWConfigs = errors.New("rule groups has different remote write configs")
 )
 
 // NamespaceState is used to denote the difference between the staged namespace
@@ -79,6 +80,16 @@ func CompareGroups(groupOne, groupTwo rwrulefmt.RuleGroup) error {
 
 	if len(groupOne.Rules) != len(groupTwo.Rules) {
 		return errDiffRuleLen
+	}
+
+	if len(groupOne.RWConfigs) != len(groupTwo.RWConfigs) {
+		return errDiffRWConfigs
+	}
+
+	for i := range groupOne.RWConfigs {
+		if groupOne.RWConfigs[i].URL != groupTwo.RWConfigs[i].URL {
+			return errDiffRWConfigs
+		}
 	}
 
 	for i := range groupOne.Rules {
