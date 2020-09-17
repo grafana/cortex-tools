@@ -8,10 +8,6 @@ import (
 )
 
 func Test_rulesEqual(t *testing.T) {
-	type args struct {
-		a *rulefmt.RuleNode
-		b *rulefmt.RuleNode
-	}
 	tests := []struct {
 		name string
 		a    *rulefmt.RuleNode
