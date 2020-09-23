@@ -9,7 +9,6 @@ import (
 
 	"github.com/grafana/loki/pkg/ruler/manager"
 	log "github.com/sirupsen/logrus"
-
 	yaml "gopkg.in/yaml.v3"
 )
 

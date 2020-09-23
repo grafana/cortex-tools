@@ -6,16 +6,18 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/mitchellh/colorstring"
 	"github.com/prometheus/prometheus/pkg/rulefmt"
 	yaml "gopkg.in/yaml.v3"
+
+	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 )
 
 var (
-	errNameDiff     = errors.New("rule groups are named differently")
-	errIntervalDiff = errors.New("rule groups have different intervals")
-	errDiffRuleLen  = errors.New("rule groups have a different number of rules")
+	errNameDiff      = errors.New("rule groups are named differently")
+	errIntervalDiff  = errors.New("rule groups have different intervals")
+	errDiffRuleLen   = errors.New("rule groups have a different number of rules")
+	errDiffRWConfigs = errors.New("rule groups has different remote write configs")
 )
 
 // NamespaceState is used to denote the difference between the staged namespace
@@ -39,8 +41,8 @@ type NamespaceChange struct {
 	Namespace     string
 	State         NamespaceState
 	GroupsUpdated []UpdatedRuleGroup
-	GroupsCreated []rulefmt.RuleGroup
-	GroupsDeleted []rulefmt.RuleGroup
+	GroupsCreated []rwrulefmt.RuleGroup
+	GroupsDeleted []rwrulefmt.RuleGroup
 }
 
 // SummarizeChanges returns the number of each type of change in a set of changes
@@ -62,12 +64,12 @@ func SummarizeChanges(changes []NamespaceChange) (created, updated, deleted int)
 
 // UpdatedRuleGroup is used to store an change between a rule group
 type UpdatedRuleGroup struct {
-	New      rulefmt.RuleGroup
-	Original rulefmt.RuleGroup
+	New      rwrulefmt.RuleGroup
+	Original rwrulefmt.RuleGroup
 }
 
 // CompareGroups differentiates between two rule groups
-func CompareGroups(groupOne, groupTwo rulefmt.RuleGroup) error {
+func CompareGroups(groupOne, groupTwo rwrulefmt.RuleGroup) error {
 	if groupOne.Name != groupTwo.Name {
 		return errNameDiff
 	}
@@ -78,6 +80,16 @@ func CompareGroups(groupOne, groupTwo rulefmt.RuleGroup) error {
 
 	if len(groupOne.Rules) != len(groupTwo.Rules) {
 		return errDiffRuleLen
+	}
+
+	if len(groupOne.RWConfigs) != len(groupTwo.RWConfigs) {
+		return errDiffRWConfigs
+	}
+
+	for i := range groupOne.RWConfigs {
+		if groupOne.RWConfigs[i].URL != groupTwo.RWConfigs[i].URL {
+			return errDiffRWConfigs
+		}
 	}
 
 	for i := range groupOne.Rules {
@@ -91,17 +103,30 @@ func CompareGroups(groupOne, groupTwo rulefmt.RuleGroup) error {
 }
 
 func rulesEqual(a, b *rulefmt.RuleNode) bool {
-	// special option to consider nil == empty for map / slice.
-	// Code taken from https://pkg.go.dev/github.com/google/go-cmp/cmp?tab=doc#example-Option-EqualEmpty
-	alwaysEqual := cmp.Comparer(func(_, _ interface{}) bool { return true })
-	opt := cmp.FilterValues(func(x, y interface{}) bool {
-		vx, vy := reflect.ValueOf(x), reflect.ValueOf(y)
-		return (vx.IsValid() && vy.IsValid() && vx.Type() == vy.Type()) &&
-			(vx.Kind() == reflect.Slice || vx.Kind() == reflect.Map) &&
-			(vx.Len() == 0 && vy.Len() == 0)
-	}, alwaysEqual)
+	if a.Alert.Value != b.Alert.Value ||
+		a.Record.Value != b.Record.Value ||
+		a.Expr.Value != b.Expr.Value ||
+		a.For != b.For {
+		return false
+	}
 
-	return cmp.Equal(a, b, opt)
+	if a.Annotations != nil && b.Annotations != nil {
+		if !reflect.DeepEqual(a.Annotations, b.Annotations) {
+			return false
+		}
+	} else if a.Annotations != nil || b.Annotations != nil {
+		return false
+	}
+
+	if a.Labels != nil && b.Labels != nil {
+		if !reflect.DeepEqual(a.Labels, b.Labels) {
+			return false
+		}
+	} else if a.Labels != nil || b.Labels != nil {
+		return false
+	}
+
+	return true
 }
 
 // CompareNamespaces returns the differences between the two provided
@@ -111,11 +136,11 @@ func CompareNamespaces(original, new RuleNamespace) NamespaceChange {
 		Namespace:     new.Namespace,
 		State:         Unchanged,
 		GroupsUpdated: []UpdatedRuleGroup{},
-		GroupsCreated: []rulefmt.RuleGroup{},
-		GroupsDeleted: []rulefmt.RuleGroup{},
+		GroupsCreated: []rwrulefmt.RuleGroup{},
+		GroupsDeleted: []rwrulefmt.RuleGroup{},
 	}
 
-	origMap := map[string]rulefmt.RuleGroup{}
+	origMap := map[string]rwrulefmt.RuleGroup{}
 	for _, g := range original.Groups {
 		origMap[g.Name] = g
 	}

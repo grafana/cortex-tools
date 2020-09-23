@@ -11,7 +11,7 @@ require (
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
-	github.com/google/go-cmp v0.5.1
+	github.com/google/go-github/v32 v32.1.0
 	github.com/grafana/loki v1.6.2-0.20200923203102-89b8ae4b4981
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.2.0

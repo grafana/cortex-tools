@@ -2,7 +2,15 @@
 
 ## unreleased / master
 
+## v0.3.1
+
+* [FEATURE] Add support for GME remote-write rule groups. #82
+* [BUGFIX] Fix issue where rule comparisons would be affected by the format of the YAML file. #88
+
+## v0.3.0
+
 * [FEATURE] Added loki backend support for the rules commands, configurable with `--backend=loki` (defaults to cortex).
+* [FEATURE] Introduces a new `version` command. The command will also let you know if there's a new version available.
 
 ## v0.2.4
 
