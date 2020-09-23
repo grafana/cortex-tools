@@ -2,6 +2,8 @@
 
 ## unreleased / master
 
+* [FEATURE] Add overrides-exporter to cortextool, which exports Cortex runtime configuration overrides as metrics. #91
+
 ## v0.3.2
 
 * [BUGFIX] Supports `rules lint` with LogQL: [#92](https://github.com/grafana/cortex-tools/pull/92).
