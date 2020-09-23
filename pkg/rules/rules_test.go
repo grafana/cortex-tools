@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/prometheus/prometheus/pkg/rulefmt"
-	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v3"
 	"gotest.tools/assert"
@@ -222,8 +221,6 @@ func TestLintExpressions(t *testing.T) {
 	}
 
 	for _, tc := range tt {
-		x := parser.NumberLiteral{Val: 2}
-		x.String()
 		t.Run(tc.name, func(t *testing.T) {
 			r := RuleNamespace{Groups: []rwrulefmt.RuleGroup{
 				{
