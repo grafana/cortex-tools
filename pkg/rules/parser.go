@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/grafana/loki/pkg/ruler/manager"
+	"github.com/prometheus/prometheus/pkg/rulefmt"
 	log "github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -95,7 +96,14 @@ func ParseLoki(f string) (*RuleNamespace, []error) {
 		return nil, []error{err}
 	}
 
-	return &ns, manager.ValidateGroups(ns.Groups...)
+	// the upstream loki validator only validates the rulefmt rule groups,
+	// not the remote write configs this type attaches.
+	var grps []rulefmt.RuleGroup
+	for _, g := range ns.Groups {
+		grps = append(grps, g.RuleGroup)
+	}
+
+	return &ns, manager.ValidateGroups(grps...)
 }
 
 func loadFile(filename string) ([]byte, error) {

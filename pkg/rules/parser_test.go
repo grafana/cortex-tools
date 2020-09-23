@@ -83,12 +83,14 @@ func TestParseFiles(t *testing.T) {
 			want: map[string]RuleNamespace{
 				"foo": {
 					Namespace: "foo",
-					Groups: []rulefmt.RuleGroup{
+					Groups: []rwrulefmt.RuleGroup{
 						{
-							Name: "testgrp2",
-							Rules: []rulefmt.RuleNode{
-								{
-									// currently the tests only check length
+							RuleGroup: rulefmt.RuleGroup{
+								Name: "testgrp2",
+								Rules: []rulefmt.RuleNode{
+									{
+										// currently the tests only check length
+									},
 								},
 							},
 						},
