@@ -26,34 +26,22 @@ var (
 // ParseFiles returns a formatted set of prometheus rule groups
 func ParseFiles(backend string, files []string) (map[string]RuleNamespace, error) {
 	ruleSet := map[string]RuleNamespace{}
+	var parseFn func(f string) (*RuleNamespace, []error)
+	switch backend {
+	case CortexBackend:
+		parseFn = Parse
+	case LokiBackend:
+		parseFn = ParseLoki
+	default:
+		return nil, errInvalidBackend
+	}
+
 	for _, f := range files {
-		var ns *RuleNamespace
-		var errs []error
-
-		switch backend {
-		case CortexBackend:
-			ns, errs = Parse(f)
-			for _, err := range errs {
-				log.WithError(err).WithField("file", f).Errorln("unable parse rules file")
-				return nil, errFileReadError
-			}
-
-		case LokiBackend:
-			var loader manager.GroupLoader
-			rgs, errs := loader.Load(f)
-			for _, err := range errs {
-				log.WithError(err).WithField("file", f).Errorln("unable parse rules file")
-				return nil, errFileReadError
-			}
-
-			ns = &RuleNamespace{
-				Groups: rgs.Groups,
-			}
-
-		default:
-			return nil, errInvalidBackend
+		ns, errs := parseFn(f)
+		for _, err := range errs {
+			log.WithError(err).WithField("file", f).Errorln("unable parse rules file")
+			return nil, errFileReadError
 		}
-
 		ns.Filepath = f
 
 		// Determine if the namespace is explicitly set. If not
@@ -92,6 +80,23 @@ func Parse(f string) (*RuleNamespace, []error) {
 		return nil, []error{err}
 	}
 	return &ns, ns.Validate()
+}
+
+func ParseLoki(f string) (*RuleNamespace, []error) {
+	content, err := loadFile(f)
+	if err != nil {
+		log.WithError(err).WithField("file", f).Errorln("unable load rules file")
+		return nil, []error{errFileReadError}
+	}
+
+	var ns RuleNamespace
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&ns); err != nil {
+		return nil, []error{err}
+	}
+
+	return &ns, manager.ValidateGroups(ns.Groups...)
 }
 
 func loadFile(filename string) ([]byte, error) {

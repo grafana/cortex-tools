@@ -69,6 +69,28 @@ func TestParseFiles(t *testing.T) {
 			},
 		},
 		{
+			name:    "basic_loki_namespace",
+			backend: LokiBackend,
+			files: []string{
+				"testdata/loki_basic_namespace.yaml",
+			},
+			want: map[string]RuleNamespace{
+				"foo": {
+					Namespace: "foo",
+					Groups: []rulefmt.RuleGroup{
+						{
+							Name: "testgrp2",
+							Rules: []rulefmt.RuleNode{
+								{
+									// currently the tests only check length
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name:    "basic_loki_failure",
 			backend: LokiBackend,
 			files: []string{
