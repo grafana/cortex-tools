@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -273,29 +274,6 @@ var (
 	ErrBadRuleGroup = errors.New("unable to decoded rule group")
 )
 
-// ValidateRuleGroup validates a rulegroup
-func ValidateRuleGroup(g rulefmt.RuleGroup) []error {
-	var errs []error
-	for i, r := range g.Rules {
-		for _, err := range r.Validate() {
-			var ruleName string
-			if r.Alert.Value != "" {
-				ruleName = r.Alert.Value
-			} else {
-				ruleName = r.Record.Value
-			}
-			errs = append(errs, &rulefmt.Error{
-				Group:    g.Name,
-				Rule:     i,
-				RuleName: ruleName,
-				Err:      err,
-			})
-		}
-	}
-
-	return errs
-}
-
 func marshalAndSend(output interface{}, w http.ResponseWriter, logger log.Logger) {
 	d, err := yaml.Marshal(&output)
 	if err != nil {
@@ -464,12 +442,15 @@ func (r *Ruler) CreateRuleGroup(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	errs := ValidateRuleGroup(rg)
+	errs := r.manager.ValidateRuleGroup(rg)
 	if len(errs) > 0 {
+		e := []string{}
 		for _, err := range errs {
 			level.Error(logger).Log("msg", "unable to validate rule group payload", "err", err.Error())
+			e = append(e, err.Error())
 		}
-		http.Error(w, errs[0].Error(), http.StatusBadRequest)
+
+		http.Error(w, strings.Join(e, ", "), http.StatusBadRequest)
 		return
 	}
 
@@ -480,6 +461,28 @@ func (r *Ruler) CreateRuleGroup(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		level.Error(logger).Log("msg", "unable to store rule group", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondAccepted(w, logger)
+}
+
+func (r *Ruler) DeleteNamespace(w http.ResponseWriter, req *http.Request) {
+	logger := util.WithContext(req.Context(), util.Logger)
+
+	userID, namespace, _, err := parseRequest(req, true, false)
+	if err != nil {
+		respondError(logger, w, err.Error())
+		return
+	}
+
+	err = r.store.DeleteNamespace(req.Context(), userID, namespace)
+	if err != nil {
+		if err == rules.ErrGroupNamespaceNotFound {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		respondError(logger, w, err.Error())
 		return
 	}
 

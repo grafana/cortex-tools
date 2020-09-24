@@ -7,12 +7,12 @@ require (
 	cloud.google.com/go/storage v1.6.0
 	github.com/alecthomas/chroma v0.7.0
 	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
-	github.com/cortexproject/cortex v1.3.1-0.20200831131844-2efff16014c8
+	github.com/cortexproject/cortex v1.3.1-0.20200923132904-22f2efdc1339
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
 	github.com/google/go-github/v32 v32.1.0
-	github.com/grafana/loki v1.6.2-0.20200831213751-f905e77259f2
+	github.com/grafana/loki v1.6.2-0.20200923203102-89b8ae4b4981
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pkg/errors v0.9.1
@@ -21,7 +21,7 @@ require (
 	github.com/prometheus/common v0.11.1
 	github.com/prometheus/prometheus v1.8.2-0.20200819132913-cb830b0a9c78
 	github.com/sirupsen/logrus v1.6.0
-	github.com/stretchr/testify v1.5.1
+	github.com/stretchr/testify v1.6.1
 	google.golang.org/api v0.29.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776
