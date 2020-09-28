@@ -89,28 +89,6 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 }
 
 func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
-	writeURL, err := url.Parse(c.writeURL)
-	if err != nil {
-		return err
-	}
-
-	writeClient, err := remote.NewWriteClient("loadgen", &remote.ClientConfig{
-		URL:     &config.URL{URL: writeURL},
-		Timeout: model.Duration(c.writeTimeout),
-	})
-	if err != nil {
-		return err
-	}
-	c.writeClient = writeClient
-
-	queryClient, err := api.NewClient(api.Config{
-		Address: c.queryURL,
-	})
-	if err != nil {
-		return err
-	}
-	c.queryClient = v1.NewAPI(queryClient)
-
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		err := http.ListenAndServe(c.metricsListenAddress, nil)
@@ -119,16 +97,45 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		}
 	}()
 
-	c.wg.Add(c.parallelism)
-	c.wg.Add(c.queryParallelism)
+	if c.writeURL != "" {
+		log.Printf("setting up write load gen:\n  url=%s\n  parallelism: %v\n  active_series: %d\n interval: %v\n", c.writeURL, c.parallelism, c.activeSeries, c.scrapeInterval)
+		writeURL, err := url.Parse(c.writeURL)
+		if err != nil {
+			return err
+		}
 
-	metricsPerShard := c.activeSeries / c.parallelism
-	for i := 0; i < c.activeSeries; i += metricsPerShard {
-		go c.runWriteShard(i, i+metricsPerShard)
+		writeClient, err := remote.NewWriteClient("loadgen", &remote.ClientConfig{
+			URL:     &config.URL{URL: writeURL},
+			Timeout: model.Duration(c.writeTimeout),
+		})
+		if err != nil {
+			return err
+		}
+		c.writeClient = writeClient
+
+		c.wg.Add(c.parallelism)
+
+		metricsPerShard := c.activeSeries / c.parallelism
+		for i := 0; i < c.activeSeries; i += metricsPerShard {
+			go c.runWriteShard(i, i+metricsPerShard)
+		}
 	}
 
-	for i := 0; i < c.queryParallelism; i++ {
-		go c.runQueryShard()
+	if c.queryURL != "" {
+		log.Printf("setting up query load gen:\n  url=%s\n  parallelism: %v\n  query: %s", c.queryURL, c.queryParallelism, c.query)
+		queryClient, err := api.NewClient(api.Config{
+			Address: c.queryURL,
+		})
+		if err != nil {
+			return err
+		}
+		c.queryClient = v1.NewAPI(queryClient)
+
+		c.wg.Add(c.queryParallelism)
+
+		for i := 0; i < c.queryParallelism; i++ {
+			go c.runQueryShard()
+		}
 	}
 
 	c.wg.Wait()
