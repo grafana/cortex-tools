@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -61,7 +62,7 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 	loadgenCommand := &LoadgenCommand{}
 	cmd := app.Command("loadgen", "Simple load generator for Cortex.").Action(loadgenCommand.run)
 	cmd.Flag("write-url", "").
-		Required().StringVar(&loadgenCommand.writeURL)
+		Default("").StringVar(&loadgenCommand.writeURL)
 	cmd.Flag("active-series", "number of active series to send").
 		Default("1000").IntVar(&loadgenCommand.activeSeries)
 	cmd.Flag("scrape-interval", "period to send metrics").
@@ -74,7 +75,7 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 		Default("500ms").DurationVar(&loadgenCommand.writeTimeout)
 
 	cmd.Flag("query-url", "").
-		Required().StringVar(&loadgenCommand.queryURL)
+		Default("").StringVar(&loadgenCommand.queryURL)
 	cmd.Flag("query", "query to run").
 		Default("sum(node_cpu_seconds_total)").StringVar(&loadgenCommand.query)
 	cmd.Flag("query-parallelism", "number of queries to run in parallel").
@@ -89,6 +90,10 @@ func (c *LoadgenCommand) Register(app *kingpin.Application) {
 }
 
 func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
+	if c.writeURL == "" && c.queryURL == "" {
+		return errors.New("either a -write-url or -query-url flag must be provided to run the loadgen command")
+	}
+
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		err := http.ListenAndServe(c.metricsListenAddress, nil)
@@ -119,6 +124,8 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		for i := 0; i < c.activeSeries; i += metricsPerShard {
 			go c.runWriteShard(i, i+metricsPerShard)
 		}
+	} else {
+		log.Println("write load generation is disabled, -write-url flag has not been set")
 	}
 
 	if c.queryURL != "" {
@@ -136,6 +143,8 @@ func (c *LoadgenCommand) run(k *kingpin.ParseContext) error {
 		for i := 0; i < c.queryParallelism; i++ {
 			go c.runQueryShard()
 		}
+	} else {
+		log.Println("query load generation is disabled, -query-url flag has not been set")
 	}
 
 	c.wg.Wait()
