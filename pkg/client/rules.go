@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 )
 
+const rulerAPIPath = "/api/v1/rules/"
 // CreateRuleGroup creates a new rule group
 func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg rwrulefmt.RuleGroup) error {
 	payload, err := yaml.Marshal(&rg)
@@ -20,7 +21,7 @@ func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg
 	}
 
 	escapedNamespace := url.PathEscape(namespace)
-	res, err := r.doRequest("/api/prom/rules/"+escapedNamespace, "POST", payload)
+	res, err := r.doRequest(rulerAPIPath+escapedNamespace, "POST", payload)
 	if err != nil {
 		return err
 	}
@@ -35,7 +36,7 @@ func (r *CortexClient) DeleteRuleGroup(ctx context.Context, namespace, groupName
 	escapedNamespace := url.PathEscape(namespace)
 	escapedGroupName := url.PathEscape(groupName)
 
-	_, err := r.doRequest("/api/prom/rules/"+escapedNamespace+"/"+escapedGroupName, "DELETE", nil)
+	_, err := r.doRequest(rulerAPIPath+escapedNamespace+"/"+escapedGroupName, "DELETE", nil)
 	return err
 }
 
@@ -76,7 +77,7 @@ func (r *CortexClient) GetRuleGroup(ctx context.Context, namespace, groupName st
 
 // ListRules retrieves a rule group
 func (r *CortexClient) ListRules(ctx context.Context, namespace string) (map[string][]rwrulefmt.RuleGroup, error) {
-	path := "/api/prom/rules"
+	path := rulerAPIPath
 	if namespace != "" {
 		path = path + "/" + namespace
 	}
