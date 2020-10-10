@@ -13,6 +13,7 @@ import (
 )
 
 const rulerAPIPath = "/api/v1/rules"
+
 // CreateRuleGroup creates a new rule group
 func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg rwrulefmt.RuleGroup) error {
 	payload, err := yaml.Marshal(&rg)
@@ -44,7 +45,7 @@ func (r *CortexClient) DeleteRuleGroup(ctx context.Context, namespace, groupName
 func (r *CortexClient) GetRuleGroup(ctx context.Context, namespace, groupName string) (*rwrulefmt.RuleGroup, error) {
 	escapedNamespace := url.PathEscape(namespace)
 	escapedGroupName := url.PathEscape(groupName)
-	path := rulerAPIPath+"/" + escapedNamespace + "/" + escapedGroupName
+	path := rulerAPIPath + "/" + escapedNamespace + "/" + escapedGroupName
 
 	log.WithFields(log.Fields{
 		"url": path,
