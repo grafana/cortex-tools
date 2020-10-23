@@ -23,6 +23,8 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 	"gopkg.in/yaml.v3"
 
+	yamlV2 "gopkg.in/yaml.v2"
+
 	chunkTool "github.com/grafana/cortex-tools/pkg/chunk"
 	"github.com/grafana/cortex-tools/pkg/chunk/filter"
 	toolGCP "github.com/grafana/cortex-tools/pkg/chunk/gcp"
@@ -208,7 +210,7 @@ func LoadConfig(filename string, expandENV bool, cfg *cortex.Config) error {
 		buf = expandEnv(buf)
 	}
 
-	err = yaml.Unmarshal(buf, cfg)
+	err = yamlV2.Unmarshal(buf, cfg)
 	if err != nil {
 		return errors.Wrap(err, "Error parsing config file")
 	}
