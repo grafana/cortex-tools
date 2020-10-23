@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
+	"github.com/cortexproject/cortex/pkg/chunk/cassandra"
 	"github.com/cortexproject/cortex/pkg/chunk/gcp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -89,6 +91,13 @@ type deleteSeriesCommandOptions struct {
 	chunkCommandOptions
 }
 
+type chunkCleanCommandOptions struct {
+	cassandraCfg cassandra.Config
+	schema       SchemaConfig
+	inputFile    string
+	table        string
+}
+
 func registerDeleteChunkCommandOptions(cmd *kingpin.CmdClause) {
 	deleteChunkCommandOptions := &deleteChunkCommandOptions{}
 	deleteChunkCommand := cmd.Command("delete", "Deletes the specified chunk references from the index").Action(deleteChunkCommandOptions.run)
@@ -111,12 +120,22 @@ func registerDeleteSeriesCommandOptions(cmd *kingpin.CmdClause) {
 	deleteSeriesCommandOptions.FilterConfig.Register(deleteSeriesCommand)
 }
 
+func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
+	chunkCleanCommandOptions := &chunkCleanCommandOptions{}
+	chunkCleanCommand := cmd.Command("clean", "Deletes chunks defined in an input file from a table").Action(chunkCleanCommandOptions.run)
+	chunkCleanCommand.Flag("input-file", "File with list of chunks to delete").Required().StringVar(&chunkCleanCommandOptions.inputFile)
+	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.table)
+	chunkCleanCommand.Flag("schema-file", "Path to file containing cortex schema config").Required().StringVar(&chunkCleanCommandOptions.schema.FileName)
+
+}
+
 // RegisterChunkCommands registers the ChunkCommand flags with the kingpin applicattion
 func RegisterChunkCommands(app *kingpin.Application) {
 	chunkCommand := app.Command("chunk", "Chunk related operations").PreAction(setup)
 	registerDeleteChunkCommandOptions(chunkCommand)
 	registerDeleteSeriesCommandOptions(chunkCommand)
 	registerMigrateChunksCommandOptions(chunkCommand)
+	registerChunkCleanCommandOptions(chunkCommand)
 }
 
 func setup(k *kingpin.ParseContext) error {
@@ -129,6 +148,47 @@ func setup(k *kingpin.ParseContext) error {
 		labelEntriesDeleted,
 	)
 	return nil
+}
+
+func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
+	err := c.schema.Load()
+	if err != nil {
+		return errors.Wrap(err, "unable to load schema")
+	}
+
+	var schemaConfig chunk.SchemaConfig
+	for _, entry := range c.schema.Configs {
+		schemaConfig.Configs = append(schemaConfig.Configs, *entry)
+	}
+
+	cfg := cassandra.Config{}
+	client, err := cassandra.NewStorageClient(cfg, schemaConfig, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to connect to Cassandra")
+	}
+
+	inputFile, err := os.Open(c.inputFile)
+	if err != nil {
+		return errors.Wrap(err, "failed opening input file")
+	}
+	scanner := bufio.NewScanner(inputFile)
+	scanner.Split(bufio.ScanLines)
+
+	batch := client.NewWriteBatch()
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) != 2 {
+			return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
+		}
+
+		batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	return client.BatchWrite(ctx, batch)
 }
 
 func (c *deleteChunkCommandOptions) run(k *kingpin.ParseContext) error {
