@@ -217,14 +217,16 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 					lineCnt++
 
 					if lineCnt >= c.batchSize {
-						break
+						logrus.Debugf("applying batch: %s", line)
+						err = client.BatchWrite(ctx, batch)
+						if err != nil {
+							return errors.Wrap(err, "failed to delete chunks")
+						}
+						batch = client.NewWriteBatch()
 					}
 				}
 
-				err = client.BatchWrite(ctx, batch)
-				if err != nil {
-					return errors.Wrap(err, "failed to delete chunks")
-				}
+				return nil
 			}
 		})
 	}
