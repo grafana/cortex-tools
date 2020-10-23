@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/cortex"
+	"github.com/cortexproject/cortex/pkg/util/flagext"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/chunk/cassandra"
@@ -97,9 +99,11 @@ type deleteSeriesCommandOptions struct {
 }
 
 type chunkCleanCommandOptions struct {
-	cortexCfg string
-	inputFile string
-	table     string
+	cortexCfg   string
+	inputFile   string
+	table       string
+	batchSize   int
+	concurrency int
 }
 
 func registerDeleteChunkCommandOptions(cmd *kingpin.CmdClause) {
@@ -130,6 +134,8 @@ func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
 	chunkCleanCommand.Flag("input-file", "File with list of chunks to delete").Required().StringVar(&chunkCleanCommandOptions.inputFile)
 	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.table)
 	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&chunkCleanCommandOptions.cortexCfg)
+	chunkCleanCommand.Flag("batch-size", "How many deletes to submit in one batch").Default("100").IntVar(&chunkCleanCommandOptions.batchSize)
+	chunkCleanCommand.Flag("concurrency", "How many concurrent threads to run").Default("8").IntVar(&chunkCleanCommandOptions.concurrency)
 
 }
 
@@ -156,6 +162,7 @@ func setup(k *kingpin.ParseContext) error {
 
 func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	cortexCfg := &cortex.Config{}
+	flagext.RegisterFlags(cortexCfg)
 	err := LoadConfig(c.cortexCfg, true, cortexCfg)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse Cortex config")
@@ -166,10 +173,13 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "failed to load schemas")
 	}
 
+	logrus.Debug("Connecting to Cassandra")
 	client, err := cassandra.NewStorageClient(cortexCfg.Storage.CassandraStorageConfig, cortexCfg.Schema, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect to Cassandra")
 	}
+
+	logrus.Debug("Connected")
 
 	inputFile, err := os.Open(c.inputFile)
 	if err != nil {
@@ -178,24 +188,72 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	scanner := bufio.NewScanner(inputFile)
 	scanner.Split(bufio.ScanLines)
 
-	batch := client.NewWriteBatch()
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, ",", 2)
-		if len(parts) != 2 {
-			return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
-		}
-
-		batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
-	}
+	// One channel message per input line.
+	lineCh := make(chan string, c.concurrency)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = client.BatchWrite(ctx, batch)
+	g, ctx := errgroup.WithContext(ctx)
+	for i := 0; i < c.concurrency; i++ {
+		g.Go(func() error {
+			for {
+				batch := client.NewWriteBatch()
+				lineCnt := 0
+				for line := range lineCh {
+					select {
+					case <-ctx.Done():
+						return nil
+					default:
+					}
+
+					logrus.Debugf("processing line: %s", line)
+					parts := strings.SplitN(line, ",", 2)
+					if len(parts) != 2 {
+						return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
+					}
+
+					batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
+					lineCnt++
+
+					if lineCnt >= c.batchSize {
+						break
+					}
+				}
+
+				err = client.BatchWrite(ctx, batch)
+				if err != nil {
+					return errors.Wrap(err, "failed to delete chunks")
+				}
+			}
+		})
+	}
+
+	for scanner.Scan() {
+		lineCh <- scanner.Text()
+	}
+	close(lineCh)
+
+	err = g.Wait()
 	if err != nil {
 		return errors.Wrap(err, "failed to delete chunks")
 	}
+
+	// batch := client.NewWriteBatch()
+	// for scanner.Scan() {
+	// 	line := scanner.Text()
+	// 	parts := strings.SplitN(line, ",", 2)
+	// 	if len(parts) != 2 {
+	// 		return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
+	// 	}
+
+	// 	batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
+	// }
+
+	// err = client.BatchWrite(ctx, batch)
+	// if err != nil {
+	// 	return errors.Wrap(err, "failed to delete chunks")
+	// }
 	return nil
 }
 
