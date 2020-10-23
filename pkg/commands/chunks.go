@@ -159,6 +159,11 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "failed to parse Cortex config")
 	}
 
+	err = cortexCfg.Schema.Load()
+	if err != nil {
+		return errors.Wrap(err, "failed to load schemas")
+	}
+
 	client, err := cassandra.NewStorageClient(cortexCfg.Storage.CassandraStorageConfig, cortexCfg.Schema, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect to Cassandra")
