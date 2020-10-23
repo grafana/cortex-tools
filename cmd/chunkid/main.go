@@ -41,6 +41,9 @@ func main() {
 		Fingerprint: labelSet.Fingerprint(),
 		From:        model.Time(*fromI),
 		Through:     model.Time(*throughI),
+
+		// necessary to get the same chunk id format that we're looking for.
+		ChecksumSet: true,
 	}
 
 	fmt.Println(fmt.Sprintf("Chunk ID is: %s", c.ExternalKey()))
