@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cortexproject/cortex/pkg/cortex"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/chunk/cassandra"
@@ -92,10 +95,9 @@ type deleteSeriesCommandOptions struct {
 }
 
 type chunkCleanCommandOptions struct {
-	cassandraCfg cassandra.Config
-	schema       SchemaConfig
-	inputFile    string
-	table        string
+	cortexCfg string
+	inputFile string
+	table     string
 }
 
 func registerDeleteChunkCommandOptions(cmd *kingpin.CmdClause) {
@@ -125,7 +127,7 @@ func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
 	chunkCleanCommand := cmd.Command("clean", "Deletes chunks defined in an input file from a table").Action(chunkCleanCommandOptions.run)
 	chunkCleanCommand.Flag("input-file", "File with list of chunks to delete").Required().StringVar(&chunkCleanCommandOptions.inputFile)
 	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.table)
-	chunkCleanCommand.Flag("schema-file", "Path to file containing cortex schema config").Required().StringVar(&chunkCleanCommandOptions.schema.FileName)
+	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&chunkCleanCommandOptions.cortexCfg)
 
 }
 
@@ -151,18 +153,13 @@ func setup(k *kingpin.ParseContext) error {
 }
 
 func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
-	err := c.schema.Load()
+	cortexCfg := &cortex.Config{}
+	err := LoadConfig(c.cortexCfg, true, cortexCfg)
 	if err != nil {
-		return errors.Wrap(err, "unable to load schema")
+		return errors.Wrap(err, "failed to parse Cortex config")
 	}
 
-	var schemaConfig chunk.SchemaConfig
-	for _, entry := range c.schema.Configs {
-		schemaConfig.Configs = append(schemaConfig.Configs, *entry)
-	}
-
-	cfg := cassandra.Config{}
-	client, err := cassandra.NewStorageClient(cfg, schemaConfig, nil)
+	client, err := cassandra.NewStorageClient(cortexCfg.Storage.CassandraStorageConfig, cortexCfg.Schema, nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to connect to Cassandra")
 	}
@@ -193,6 +190,41 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "failed to delete chunks")
 	}
 	return nil
+}
+
+// LoadConfig read YAML-formatted config from filename into cfg.
+func LoadConfig(filename string, expandENV bool, cfg *cortex.Config) error {
+	buf, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return errors.Wrap(err, "Error reading config file")
+	}
+
+	if expandENV {
+		buf = expandEnv(buf)
+	}
+
+	err = yaml.Unmarshal(buf, cfg)
+	if err != nil {
+		return errors.Wrap(err, "Error parsing config file")
+	}
+
+	return nil
+}
+
+// expandEnv replaces ${var} or $var in config according to the values of the current environment variables.
+// The replacement is case-sensitive. References to undefined variables are replaced by the empty string.
+// A default value can be given by using the form ${var:default value}.
+func expandEnv(config []byte) []byte {
+	return []byte(os.Expand(string(config), func(key string) string {
+		keyAndDefault := strings.SplitN(key, ":", 2)
+		key = keyAndDefault[0]
+
+		v := os.Getenv(key)
+		if v == "" && len(keyAndDefault) == 2 {
+			v = keyAndDefault[1] // Set value to the default.
+		}
+		return v
+	}))
 }
 
 func (c *deleteChunkCommandOptions) run(k *kingpin.ParseContext) error {
