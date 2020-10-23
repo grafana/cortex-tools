@@ -3,12 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"strings"
-
-	"github.com/prometheus/prometheus/pkg/labels"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/promql/parser"
 )
 
 func main() {
@@ -18,21 +16,14 @@ func main() {
 	throughI := flag.Int64("through", 0, "through timestamp in ms")
 	flag.Parse()
 
-	builder := labels.NewBuilder(nil)
-	for _, label := range strings.Split(*labelSetStr, ",") {
-		lv := strings.SplitN(label, "=", 2)
-		if len(lv) != 2 {
-			panic(fmt.Sprintf("invalid label/value: %s", lv))
-		}
-
-		builder.Set(lv[0], lv[1])
+	labels, err := parser.ParseMetric(*labelSetStr)
+	if err != nil {
+		panic(err)
 	}
 
-	labels := builder.Labels()
 	labelSet := make(model.LabelSet)
-
 	for _, l := range labels {
-
+		fmt.Println(fmt.Sprintf("setting name \"%s\" with value \"%s\"", l.Name, l.Value))
 		labelSet[model.LabelName(l.Name)] = model.LabelValue(l.Value)
 	}
 
