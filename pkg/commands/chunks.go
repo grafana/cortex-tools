@@ -188,7 +188,11 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	return client.BatchWrite(ctx, batch)
+	err = client.BatchWrite(ctx, batch)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete chunks")
+	}
+	return nil
 }
 
 func (c *deleteChunkCommandOptions) run(k *kingpin.ParseContext) error {
