@@ -11,12 +11,12 @@ import (
 
 func main() {
 	userID := flag.String("user", "", "user id as string")
-	labelSetStr := flag.String("labelSet", "", "full labelset of metric, where name is value of label __name__, labels separated by \",\"")
+	metricName := flag.String("metricName", "", "full metricName")
 	fromI := flag.Int64("from", 0, "from timestamp in ms")
 	throughI := flag.Int64("through", 0, "through timestamp in ms")
 	flag.Parse()
 
-	labels, err := parser.ParseMetric(*labelSetStr)
+	labels, err := parser.ParseMetric(*metricName)
 	if err != nil {
 		panic(err)
 	}
