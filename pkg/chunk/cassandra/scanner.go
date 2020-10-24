@@ -21,9 +21,11 @@ type scanBatch struct {
 }
 
 type IndexValidator struct {
-	schema chunk.SchemaConfig
-	s      *StorageClient
-	o      *ObjectClient
+	schema          chunk.SchemaConfig
+	s               *StorageClient
+	o               *ObjectClient
+	chunkIDMap      map[string]bool
+	chunkIDMapMutex *sync.RWMutex
 }
 
 func NewIndexValidator(
@@ -50,7 +52,11 @@ func NewIndexValidator(
 	}
 
 	logrus.Debug("Connected")
-	return &IndexValidator{schema, s, o}, nil
+	return &IndexValidator{schema, s, o, map[string]bool{}, &sync.RWMutex{}}, nil
+}
+
+func (i *IndexValidator) Stop() {
+	i.s.Stop()
 }
 
 func (i *IndexValidator) IndexScan(ctx context.Context, table string, from model.Time, to model.Time, out chan string) error {
@@ -61,9 +67,9 @@ func (i *IndexValidator) IndexScan(ctx context.Context, table string, from model
 	scanner := iter.Scanner()
 
 	wg := &sync.WaitGroup{}
-	batchChan := make(chan scanBatch)
+	batchChan := make(chan scanBatch, 1000)
 
-	for n := 0; n < 16; n++ {
+	for n := 0; n < 64; n++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -82,8 +88,8 @@ func (i *IndexValidator) IndexScan(ctx context.Context, table string, from model
 		}
 		batchChan <- b
 		rowsReadTotal++
-		if rowsReadTotal%1000 == 0 {
-			logrus.Infof("index entries scanned total: %d\n", rowsReadTotal)
+		if rowsReadTotal%10000 == 0 {
+			logrus.WithField("entries_scanned", rowsReadTotal).Infoln("scan progress")
 		}
 	}
 	close(batchChan)
@@ -130,20 +136,30 @@ func (i *IndexValidator) checkEntry(
 		return
 	}
 
-	var exists int
-	err = i.o.readSession.Query(
-		fmt.Sprintf("SELECT count(*) FROM %s WHERE hash = ?", chunkTable),
-		c.ExternalKey(),
-	).WithContext(ctx).Scan(&exists)
+	var chunkExists, ok bool
+	i.chunkIDMapMutex.RLock()
+	chunkExists, ok = i.chunkIDMap[chunkID]
+	i.chunkIDMapMutex.RUnlock()
 
-	if err != nil {
-		fmt.Println(err)
-		return
+	if !ok {
+		var count int
+		err = i.o.readSession.Query(
+			fmt.Sprintf("SELECT count(*) FROM %s WHERE hash = ?", chunkTable),
+			c.ExternalKey(),
+		).WithContext(ctx).Scan(&count)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		chunkExists = count > 0
+		i.chunkIDMapMutex.Lock()
+		i.chunkIDMap[chunkID] = chunkExists
+		i.chunkIDMapMutex.Unlock()
 	}
-	if exists == 0 {
-		logrus.WithField("chunk_id", chunkID).Infoln("chunk not found, adding to output file")
+
+	if !chunkExists {
+		logrus.WithField("chunk_id", chunkID).Infoln("chunk not found, adding index entry to output file")
 		out <- fmt.Sprintf("%s,0x%x\n", string(entry.hash), entry.rangeValue)
-	} else {
-		logrus.WithField("chunk_id", chunkID).Debugln("chunk found")
 	}
 }

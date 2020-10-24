@@ -595,6 +595,8 @@ func (v *validateIndexCommandOptions) run(k *kingpin.ParseContext) error {
 	if err != nil {
 		return err
 	}
+	defer indexValidator.Stop()
+
 	from := model.TimeFromUnix(v.FromTimestamp)
 	to := model.TimeFromUnix(v.ToTimestamp)
 
