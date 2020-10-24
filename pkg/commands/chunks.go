@@ -220,7 +220,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 
 					data, err := hex.DecodeString(parts[1])
 					if err != nil {
-						return errors.New("invalid range value")
+						return errors.Wrap(err, "invalid range value")
 					}
 
 					batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
