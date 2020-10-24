@@ -92,7 +92,7 @@ func setClusterConfig(cfg cassandra.Config, cluster *gocql.ClusterConfig) error 
 			password = string(passwordBytes)
 		}
 		if len(cfg.CustomAuthenticators) != 0 {
-			cluster.Authenticator = CustomPasswordAuthenticator{
+			cluster.Authenticator = cassandra.CustomPasswordAuthenticator{
 				ApprovedAuthenticators: cfg.CustomAuthenticators,
 				Username:               cfg.Username,
 				Password:               password,
