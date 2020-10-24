@@ -130,7 +130,7 @@ type chunkCleanCommandOptions struct {
 
 func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
 	opts := &chunkCleanCommandOptions{}
-	chunkCleanCommand := cmd.Command("index-clean", "Deletes the index entries specified in the provided file from the specified index table.").Action(opts.run)
+	chunkCleanCommand := cmd.Command("clean-index", "Deletes the index entries specified in the provided file from the specified index table.").Action(opts.run)
 	chunkCleanCommand.Flag("invalid-entry-file", "File with list of index entries to delete. This file is generated using the 'chunk validate-index` command.").Required().StringVar(&opts.InvalidIndexEntryFile)
 	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&opts.Table)
 	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&opts.CortexConfigFile)
