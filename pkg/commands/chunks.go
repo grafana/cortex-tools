@@ -260,21 +260,6 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "failed to delete chunks")
 	}
 
-	// batch := client.NewWriteBatch()
-	// for scanner.Scan() {
-	// 	line := scanner.Text()
-	// 	parts := strings.SplitN(line, ",", 2)
-	// 	if len(parts) != 2 {
-	// 		return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
-	// 	}
-
-	// 	batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
-	// }
-
-	// err = client.BatchWrite(ctx, batch)
-	// if err != nil {
-	// 	return errors.Wrap(err, "failed to delete chunks")
-	// }
 	return nil
 }
 
