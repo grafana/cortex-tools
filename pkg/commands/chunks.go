@@ -238,10 +238,12 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 		})
 	}
 
-	for scanner.Scan() {
-		lineCh <- scanner.Text()
-	}
-	close(lineCh)
+	go func() {
+		for scanner.Scan() {
+			lineCh <- scanner.Text()
+		}
+		close(lineCh)
+	}()
 
 	err = g.Wait()
 	if err != nil {
