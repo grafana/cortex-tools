@@ -240,16 +240,17 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 					return errors.New(fmt.Sprintf("invalid input line (%s)", line))
 				}
 
+				parts[0], parts[1] = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 				if parts[1][:2] == "0x" {
 					parts[1] = parts[1][2:]
 				}
 
-				data, err := hex.DecodeString(parts[1])
+				rangeVal, err := hex.DecodeString(parts[1])
 				if err != nil {
 					return errors.Wrap(err, "invalid range value")
 				}
 
-				batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
+				batch.Delete(c.table, parts[0], rangeVal)
 				lineCnt++
 
 				if lineCnt >= c.batchSize {
