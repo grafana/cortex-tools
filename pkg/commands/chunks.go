@@ -129,13 +129,13 @@ type chunkCleanCommandOptions struct {
 }
 
 func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
-	chunkCleanCommandOptions := &chunkCleanCommandOptions{}
-	chunkCleanCommand := cmd.Command("index-clean", "Deletes the index entries specified in the provided file from the specified index table.").Action(chunkCleanCommandOptions.run)
-	chunkCleanCommand.Flag("invalid-entry-file", "File with list of index entries to delete. This file is generated using the 'chunk validate-index` command.").Required().StringVar(&chunkCleanCommandOptions.InvalidIndexEntryFile)
-	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.Table)
-	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&chunkCleanCommandOptions.cortexCfg)
-	chunkCleanCommand.Flag("batch-size", "How many deletes to submit in one batch").Default("100").IntVar(&chunkCleanCommandOptions.BatchSize)
-	chunkCleanCommand.Flag("concurrency", "How many concurrent threads to run").Default("8").IntVar(&chunkCleanCommandOptions.Concurrency)
+	opts := &chunkCleanCommandOptions{}
+	chunkCleanCommand := cmd.Command("index-clean", "Deletes the index entries specified in the provided file from the specified index table.").Action(opts.run)
+	chunkCleanCommand.Flag("invalid-entry-file", "File with list of index entries to delete. This file is generated using the 'chunk validate-index` command.").Required().StringVar(&opts.InvalidIndexEntryFile)
+	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&opts.Table)
+	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&opts.CortexConfigFile)
+	chunkCleanCommand.Flag("batch-size", "How many deletes to submit in one batch").Default("100").IntVar(&opts.BatchSize)
+	chunkCleanCommand.Flag("concurrency", "How many concurrent threads to run").Default("8").IntVar(&opts.Concurrency)
 }
 
 type validateIndexCommandOptions struct {
@@ -150,7 +150,7 @@ func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
 	opts := &validateIndexCommandOptions{}
 	validateIndexCommand := cmd.Command("validate-index", "Scans the provided Cortex index for invalid entries. Currently, only Cassandra is supported.").Action(opts.run)
 	validateIndexCommand.Flag("cortex-config-file", "Path to a valid Cortex config file.").Required().StringVar(&opts.CortexConfigFile)
-	validateIndexCommand.Flag("invalid-entry-file", "Path to file where the hash and range values of invalid index entries will be written.").Default("invalid-entries.txt").StringVar(&opts.OutputFile)
+	validateIndexCommand.Flag("invalid-entry-file", "Path to file where the hash and range values of invalid index entries will be written.").Default("invalid-entries.txt").StringVar(&opts.InvalidIndexEntryFile)
 	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").Required().StringVar(&opts.Table)
 	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("0").Int64Var(&opts.FromTimestamp)
 	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("9223372036854775807").Int64Var(&opts.ToTimestamp)
@@ -598,7 +598,7 @@ func (v *validateIndexCommandOptions) run(k *kingpin.ParseContext) error {
 	from := model.TimeFromUnix(v.FromTimestamp)
 	to := model.TimeFromUnix(v.ToTimestamp)
 
-	outputFile, err := os.Create(v.OutputFile)
+	outputFile, err := os.Create(v.InvalidIndexEntryFile)
 	if err != nil {
 		return err
 	}
