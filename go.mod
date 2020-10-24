@@ -1,6 +1,6 @@
 module github.com/grafana/cortex-tools
 
-go 1.13
+go 1.14
 
 require (
 	cloud.google.com/go/bigtable v1.2.0
@@ -9,6 +9,8 @@ require (
 	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
 	github.com/cortexproject/cortex v1.3.1-0.20200923132904-22f2efdc1339
 	github.com/dlclark/regexp2 v1.2.0 // indirect
+	github.com/go-kit/kit v0.10.0
+	github.com/gocql/gocql v0.0.0-20200526081602-cd04bd7f22a7
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
 	github.com/google/go-github/v32 v32.1.0
@@ -22,8 +24,10 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20200819132913-cb830b0a9c78
 	github.com/sirupsen/logrus v1.6.0
 	github.com/stretchr/testify v1.6.1
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	google.golang.org/api v0.29.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
+	gopkg.in/yaml.v2 v2.3.0
 	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776
 	gotest.tools v2.2.0+incompatible
 )
