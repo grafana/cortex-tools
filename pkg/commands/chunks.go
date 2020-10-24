@@ -98,14 +98,6 @@ type deleteSeriesCommandOptions struct {
 	chunkCommandOptions
 }
 
-type chunkCleanCommandOptions struct {
-	cortexCfg   string
-	inputFile   string
-	table       string
-	batchSize   int
-	concurrency int
-}
-
 func registerDeleteChunkCommandOptions(cmd *kingpin.CmdClause) {
 	deleteChunkCommandOptions := &deleteChunkCommandOptions{}
 	deleteChunkCommand := cmd.Command("delete", "Deletes the specified chunk references from the index").Action(deleteChunkCommandOptions.run)
@@ -128,42 +120,40 @@ func registerDeleteSeriesCommandOptions(cmd *kingpin.CmdClause) {
 	deleteSeriesCommandOptions.FilterConfig.Register(deleteSeriesCommand)
 }
 
+type chunkCleanCommandOptions struct {
+	CortexConfigFile      string
+	InvalidIndexEntryFile string
+	Table                 string
+	BatchSize             int
+	Concurrency           int
+}
+
 func registerChunkCleanCommandOptions(cmd *kingpin.CmdClause) {
 	chunkCleanCommandOptions := &chunkCleanCommandOptions{}
-	chunkCleanCommand := cmd.Command("clean", "Deletes chunks defined in an input file from a table").Action(chunkCleanCommandOptions.run)
-	chunkCleanCommand.Flag("input-file", "File with list of chunks to delete").Required().StringVar(&chunkCleanCommandOptions.inputFile)
-	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.table)
+	chunkCleanCommand := cmd.Command("index-clean", "Deletes the index entries specified in the provided file from the specified index table.").Action(chunkCleanCommandOptions.run)
+	chunkCleanCommand.Flag("invalid-entry-file", "File with list of index entries to delete. This file is generated using the 'chunk validate-index` command.").Required().StringVar(&chunkCleanCommandOptions.InvalidIndexEntryFile)
+	chunkCleanCommand.Flag("table", "Table name to delete from").Required().StringVar(&chunkCleanCommandOptions.Table)
 	chunkCleanCommand.Flag("cortex-config-file", "Path to Cortex config file containing the Cassandra config").Required().StringVar(&chunkCleanCommandOptions.cortexCfg)
-	chunkCleanCommand.Flag("batch-size", "How many deletes to submit in one batch").Default("100").IntVar(&chunkCleanCommandOptions.batchSize)
-	chunkCleanCommand.Flag("concurrency", "How many concurrent threads to run").Default("8").IntVar(&chunkCleanCommandOptions.concurrency)
+	chunkCleanCommand.Flag("batch-size", "How many deletes to submit in one batch").Default("100").IntVar(&chunkCleanCommandOptions.BatchSize)
+	chunkCleanCommand.Flag("concurrency", "How many concurrent threads to run").Default("8").IntVar(&chunkCleanCommandOptions.Concurrency)
 }
 
 type validateIndexCommandOptions struct {
-	CortexConfigFile string
-	Table            string
-	FromTimestamp    int64
-	ToTimestamp      int64
-	OutputFile       string
+	CortexConfigFile      string
+	Table                 string
+	FromTimestamp         int64
+	ToTimestamp           int64
+	InvalidIndexEntryFile string
 }
 
 func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
 	opts := &validateIndexCommandOptions{}
 	validateIndexCommand := cmd.Command("validate-index", "Scans the provided Cortex index for invalid entries. Currently, only Cassandra is supported.").Action(opts.run)
-	validateIndexCommand.Flag("cortex-config-file", "Path to a valid Cortex config file.").
-		Required().
-		StringVar(&opts.CortexConfigFile)
-	validateIndexCommand.Flag("invalid-entry-output-file", "Path to file where the hash and range values of invalid index entries will be written.").
-		Default("invalid-entries.txt").
-		StringVar(&opts.OutputFile)
-	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").
-		Required().
-		StringVar(&opts.Table)
-	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").
-		Default("0").
-		Int64Var(&opts.FromTimestamp)
-	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").
-		Default("9223372036854775807").
-		Int64Var(&opts.ToTimestamp)
+	validateIndexCommand.Flag("cortex-config-file", "Path to a valid Cortex config file.").Required().StringVar(&opts.CortexConfigFile)
+	validateIndexCommand.Flag("invalid-entry-file", "Path to file where the hash and range values of invalid index entries will be written.").Default("invalid-entries.txt").StringVar(&opts.OutputFile)
+	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").Required().StringVar(&opts.Table)
+	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("0").Int64Var(&opts.FromTimestamp)
+	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("9223372036854775807").Int64Var(&opts.ToTimestamp)
 }
 
 // RegisterChunkCommands registers the ChunkCommand flags with the kingpin applicattion
@@ -191,7 +181,7 @@ func setup(k *kingpin.ParseContext) error {
 func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	cortexCfg := &cortex.Config{}
 	flagext.RegisterFlags(cortexCfg)
-	err := LoadConfig(c.cortexCfg, true, cortexCfg)
+	err := LoadConfig(c.CortexConfigFile, true, cortexCfg)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse Cortex config")
 	}
@@ -209,7 +199,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 
 	logrus.Debug("Connected")
 
-	inputFile, err := os.Open(c.inputFile)
+	inputFile, err := os.Open(c.InvalidIndexEntryFile)
 	if err != nil {
 		return errors.Wrap(err, "failed opening input file")
 	}
@@ -217,13 +207,13 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	scanner.Split(bufio.ScanLines)
 
 	// One channel message per input line.
-	lineCh := make(chan string, c.concurrency)
+	lineCh := make(chan string, c.Concurrency)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	g, ctx := errgroup.WithContext(ctx)
-	for i := 0; i < c.concurrency; i++ {
+	for i := 0; i < c.Concurrency; i++ {
 		g.Go(func() error {
 			batch := client.NewWriteBatch()
 			lineCnt := 0
@@ -249,14 +239,14 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 					return errors.Wrap(err, "invalid range value")
 				}
 
-				batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
+				batch.Delete(c.Table, strings.TrimSpace(parts[0]), data)
 				lineCnt++
 
-				if lineCnt >= c.batchSize {
+				if lineCnt >= c.BatchSize {
 					logrus.Debugf("applying batch")
 					err = client.BatchWrite(ctx, batch)
 					if err != nil {
-						return errors.Wrap(err, "failed to delete chunks")
+						return errors.Wrap(err, "failed to delete index entry")
 					}
 					batch = client.NewWriteBatch()
 					lineCnt = 0
@@ -266,7 +256,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 			logrus.Debugf("applying last batch")
 			err = client.BatchWrite(ctx, batch)
 			if err != nil {
-				return errors.Wrap(err, "failed to delete chunks")
+				return errors.Wrap(err, "failed to delete index entry")
 			}
 
 			return nil
@@ -282,7 +272,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 
 	err = g.Wait()
 	if err != nil {
-		return errors.Wrap(err, "failed to delete chunks")
+		return errors.Wrap(err, "failed to delete invalid index entry")
 	}
 
 	return nil

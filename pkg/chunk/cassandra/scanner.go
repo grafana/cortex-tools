@@ -30,6 +30,7 @@ func NewIndexValidator(
 	cfg cassandra.Config,
 	schema chunk.SchemaConfig,
 ) (*IndexValidator, error) {
+	logrus.Debug("Connecting to Cassandra")
 	o, err := NewObjectClient(
 		cfg,
 		schema,
@@ -47,6 +48,8 @@ func NewIndexValidator(
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.Debug("Connected")
 	return &IndexValidator{schema, s, o}, nil
 }
 
