@@ -227,7 +227,10 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 				logrus.Debugf("processing line: %s", line)
 				parts := strings.SplitN(line, ",", 2)
 				if len(parts) != 2 {
-					return errors.New(fmt.Sprintf("invalid input line (%s)", line))
+					logrus.WithFields(logrus.Fields{
+						"line": line,
+					}).Errorln("invalid input format")
+					continue
 				}
 
 				parts[0], parts[1] = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
@@ -237,29 +240,24 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 
 				rangeVal, err := hex.DecodeString(parts[1])
 				if err != nil {
-					return errors.Wrap(err, "invalid range value")
+					logrus.WithFields(logrus.Fields{
+						"hash":  parts[0],
+						"range": parts[1],
+					}).WithError(err).Errorln("invalid range value")
+					continue
 				}
 
 				batch.Delete(c.Table, parts[0], rangeVal)
 				lineCnt++
 
 				if lineCnt >= c.BatchSize {
-					logrus.Debugf("applying batch")
-					err = client.BatchWrite(ctx, batch)
-					if err != nil {
-						return errors.Wrap(err, "failed to delete index entry")
-					}
+					writeBatch(ctx, client, batch)
 					batch = client.NewWriteBatch()
 					lineCnt = 0
 				}
 			}
 
-			logrus.Debugf("applying last batch")
-			err = client.BatchWrite(ctx, batch)
-			if err != nil {
-				return errors.Wrap(err, "failed to delete index entry")
-			}
-
+			writeBatch(ctx, client, batch)
 			return nil
 		})
 	}
@@ -273,10 +271,24 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 
 	err = g.Wait()
 	if err != nil {
-		return errors.Wrap(err, "failed to delete invalid index entry")
+		return errors.Wrap(err, "failed to delete invalid index entries")
 	}
 
 	return nil
+}
+
+func writeBatch(ctx context.Context, client *cassandra.StorageClient, batch chunk.WriteBatch) {
+	logrus.Debugf("applying batch")
+	for retries := 5; retries > 0; retries-- {
+		err := client.BatchWrite(ctx, batch)
+		if err != nil {
+			if retries > 1 {
+				logrus.WithError(err).Warnln("failed to apply batch write, retrying")
+			} else {
+				logrus.WithError(err).Errorln("failed to apply batch write, giving up")
+			}
+		}
+	}
 }
 
 // LoadConfig read YAML-formatted config from filename into cfg.
