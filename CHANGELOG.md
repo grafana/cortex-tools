@@ -3,7 +3,7 @@
 ## unreleased/master
 
 * [ENHANCEMENT] Upgrade the Go version used in build images and tests to golang 1.14.9 to match upstream Cortex. #104
-* [FEATURE] Add `chunktool chunk index-validate` and `chunktool chunk index-clean` commands to the chunktool. These commands are used to scan Cortex index backends for invalid index entries. #104
+* [FEATURE] Add `chunktool chunk validate-index` and `chunktool chunk clean-index` commands to the chunktool. These commands are used to scan Cortex index backends for invalid index entries. #104
 
 ## v0.4.0
 
