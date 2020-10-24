@@ -223,6 +223,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 							return errors.Wrap(err, "failed to delete chunks")
 						}
 						batch = client.NewWriteBatch()
+						lineCnt = 0
 					}
 				}
 
