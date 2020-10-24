@@ -16,13 +16,10 @@ const (
 	chunkTimeRangeKeyV3  = '3'
 	chunkTimeRangeKeyV4  = '4'
 	chunkTimeRangeKeyV5  = '5'
-	metricNameRangeKeyV1 = '6'
 
 	// For v9 schema
 	seriesRangeKeyV1      = '7'
 	labelSeriesRangeKeyV1 = '8'
-	// For v11 schema
-	labelNamesRangeKeyV1 = '9'
 )
 
 func decodeRangeKey(value []byte) [][]byte {

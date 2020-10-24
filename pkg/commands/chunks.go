@@ -148,12 +148,22 @@ type validateIndexCommandOptions struct {
 
 func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
 	opts := &validateIndexCommandOptions{}
-	validateIndexCommand := cmd.Command("validate-index", "").Action(opts.run)
-	validateIndexCommand.Flag("cortex-config-file", "").StringVar(&opts.CortexConfigFile)
-	validateIndexCommand.Flag("invalid-entry-output-file", "Path to file where the hash and range values of invalid index entries will be written.").StringVar(&opts.OutputFile)
-	validateIndexCommand.Flag("table", "").StringVar(&opts.Table)
-	validateIndexCommand.Flag("from-unix-timestamp", "").Int64Var(&opts.FromTimestamp)
-	validateIndexCommand.Flag("to-unix-timestamp", "").Int64Var(&opts.ToTimestamp)
+	validateIndexCommand := cmd.Command("validate-index", "Scans the provided Cortex index for invalid entries. Currently, only Cassandra is supported.").Action(opts.run)
+	validateIndexCommand.Flag("cortex-config-file", "Path to a valid Cortex config file.").
+		Required().
+		StringVar(&opts.CortexConfigFile)
+	validateIndexCommand.Flag("invalid-entry-output-file", "Path to file where the hash and range values of invalid index entries will be written.").
+		Default("invalid-entries.txt").
+		StringVar(&opts.OutputFile)
+	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").
+		Required().
+		StringVar(&opts.Table)
+	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").
+		Default("0").
+		Int64Var(&opts.FromTimestamp)
+	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").
+		Default("9223372036854775807").
+		Int64Var(&opts.ToTimestamp)
 }
 
 // RegisterChunkCommands registers the ChunkCommand flags with the kingpin applicattion
@@ -215,53 +225,51 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < c.concurrency; i++ {
 		g.Go(func() error {
-			for {
-				batch := client.NewWriteBatch()
-				lineCnt := 0
-				for line := range lineCh {
-					select {
-					case <-ctx.Done():
-						return nil
-					default:
-					}
-
-					logrus.Debugf("processing line: %s", line)
-					parts := strings.SplitN(line, ",", 2)
-					if len(parts) != 2 {
-						return errors.New(fmt.Sprintf("invalid input line (%s)", line))
-					}
-
-					if parts[1][:2] == "0x" {
-						parts[1] = parts[1][2:]
-					}
-
-					data, err := hex.DecodeString(parts[1])
-					if err != nil {
-						return errors.Wrap(err, "invalid range value")
-					}
-
-					batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
-					lineCnt++
-
-					if lineCnt >= c.batchSize {
-						logrus.Debugf("applying batch")
-						err = client.BatchWrite(ctx, batch)
-						if err != nil {
-							return errors.Wrap(err, "failed to delete chunks")
-						}
-						batch = client.NewWriteBatch()
-						lineCnt = 0
-					}
+			batch := client.NewWriteBatch()
+			lineCnt := 0
+			for line := range lineCh {
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
 				}
 
-				logrus.Debugf("applying last batch")
-				err = client.BatchWrite(ctx, batch)
+				logrus.Debugf("processing line: %s", line)
+				parts := strings.SplitN(line, ",", 2)
+				if len(parts) != 2 {
+					return errors.New(fmt.Sprintf("invalid input line (%s)", line))
+				}
+
+				if parts[1][:2] == "0x" {
+					parts[1] = parts[1][2:]
+				}
+
+				data, err := hex.DecodeString(parts[1])
 				if err != nil {
-					return errors.Wrap(err, "failed to delete chunks")
+					return errors.Wrap(err, "invalid range value")
 				}
 
-				return nil
+				batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
+				lineCnt++
+
+				if lineCnt >= c.batchSize {
+					logrus.Debugf("applying batch")
+					err = client.BatchWrite(ctx, batch)
+					if err != nil {
+						return errors.Wrap(err, "failed to delete chunks")
+					}
+					batch = client.NewWriteBatch()
+					lineCnt = 0
+				}
 			}
+
+			logrus.Debugf("applying last batch")
+			err = client.BatchWrite(ctx, batch)
+			if err != nil {
+				return errors.Wrap(err, "failed to delete chunks")
+			}
+
+			return nil
 		})
 	}
 
