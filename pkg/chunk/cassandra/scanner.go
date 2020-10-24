@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/sirupsen/logrus"
+	"go.uber.org/atomic"
 )
 
 // scanBatch represents a batch of rows read from Cassandra.
@@ -25,6 +26,9 @@ type IndexValidator struct {
 	s        *StorageClient
 	o        *ObjectClient
 	tenantID string
+
+	totalIgnoredTime *atomic.Int64
+	totalInvalid     *atomic.Int64
 }
 
 func NewIndexValidator(
@@ -52,7 +56,14 @@ func NewIndexValidator(
 	}
 
 	logrus.Debug("Connected")
-	return &IndexValidator{schema, s, o, tenantID}, nil
+	return &IndexValidator{
+		schema:           schema,
+		s:                s,
+		o:                o,
+		tenantID:         tenantID,
+		totalIgnoredTime: atomic.NewInt64(0),
+		totalInvalid:     atomic.NewInt64(0),
+	}, nil
 }
 
 func (i *IndexValidator) Stop() {
@@ -81,6 +92,12 @@ func (i *IndexValidator) IndexScan(ctx context.Context, table string, from model
 
 	rowsReadTotal := 0
 
+	logrus.WithFields(logrus.Fields{
+		"table":   table,
+		"from_ts": from.String(),
+		"to_ts":   to.String(),
+	}).Infoln("starting scan")
+
 	for scanner.Next() {
 		b := scanBatch{}
 		if err := scanner.Scan(&b.hash, &b.rangeValue, &b.value); err != nil {
@@ -88,8 +105,12 @@ func (i *IndexValidator) IndexScan(ctx context.Context, table string, from model
 		}
 		batchChan <- b
 		rowsReadTotal++
-		if rowsReadTotal%10000 == 0 {
-			logrus.WithField("entries_scanned", rowsReadTotal).Infoln("scan progress")
+		if rowsReadTotal%25000 == 0 {
+			logrus.WithFields(logrus.Fields{
+				"entries_scanned":               rowsReadTotal,
+				"entries_outside_range_skipped": i.totalIgnoredTime.Load(),
+				"entries_invalid_found":         i.totalInvalid.Load(),
+			}).Infoln("scan progress")
 		}
 	}
 	close(batchChan)
@@ -121,7 +142,8 @@ func (i *IndexValidator) checkEntry(
 		return
 	}
 
-	if from > c.Through || c.From > to {
+	if from > c.Through || (c.From > to && to > 0) {
+		i.totalIgnoredTime.Inc()
 		logrus.WithField("chunk_id", chunkID).Debugln("ignoring chunk outside time range")
 		return
 	}
@@ -151,6 +173,7 @@ func (i *IndexValidator) checkEntry(
 
 	chunkExists := count > 0
 	if !chunkExists {
+		i.totalInvalid.Inc()
 		logrus.WithField("chunk_id", chunkID).Infoln("chunk not found, adding index entry to output file")
 		out <- fmt.Sprintf("%s,0x%x\n", string(entry.hash), entry.rangeValue)
 	}

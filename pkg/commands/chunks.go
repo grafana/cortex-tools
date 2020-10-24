@@ -154,7 +154,7 @@ func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
 	validateIndexCommand.Flag("invalid-entry-file", "Path to file where the hash and range values of invalid index entries will be written.").Default("invalid-entries.txt").StringVar(&opts.InvalidIndexEntryFile)
 	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").Required().StringVar(&opts.Table)
 	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("0").Int64Var(&opts.FromTimestamp)
-	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a maximum timestamp to scan for invalid entries.").Default("9223372036854775807").Int64Var(&opts.ToTimestamp)
+	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a maximum timestamp to scan for invalid entries.").Int64Var(&opts.ToTimestamp)
 	validateIndexCommand.Flag("tenant-id", "Tenant ID to scan entries for.").Default("fake").StringVar(&opts.TenantID)
 }
 
