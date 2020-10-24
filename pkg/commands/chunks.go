@@ -210,7 +210,7 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 					logrus.Debugf("processing line: %s", line)
 					parts := strings.SplitN(line, ",", 2)
 					if len(parts) != 2 {
-						return errors.Wrap(err, fmt.Sprintf("invalid input line (%s)", line))
+						return errors.New(fmt.Sprintf("invalid input line (%s)", line))
 					}
 
 					batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
