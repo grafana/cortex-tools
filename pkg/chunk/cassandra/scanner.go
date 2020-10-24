@@ -21,16 +21,16 @@ type scanBatch struct {
 }
 
 type IndexValidator struct {
-	schema          chunk.SchemaConfig
-	s               *StorageClient
-	o               *ObjectClient
-	chunkIDMap      map[string]bool
-	chunkIDMapMutex *sync.RWMutex
+	schema   chunk.SchemaConfig
+	s        *StorageClient
+	o        *ObjectClient
+	tenantID string
 }
 
 func NewIndexValidator(
 	cfg cassandra.Config,
 	schema chunk.SchemaConfig,
+	tenantID string,
 ) (*IndexValidator, error) {
 	logrus.Debug("Connecting to Cassandra")
 	o, err := NewObjectClient(
@@ -52,7 +52,7 @@ func NewIndexValidator(
 	}
 
 	logrus.Debug("Connected")
-	return &IndexValidator{schema, s, o, map[string]bool{}, &sync.RWMutex{}}, nil
+	return &IndexValidator{schema, s, o, tenantID}, nil
 }
 
 func (i *IndexValidator) Stop() {
@@ -115,7 +115,7 @@ func (i *IndexValidator) checkEntry(
 		return
 	}
 
-	c, err := chunk.ParseExternalKey("fake", chunkID)
+	c, err := chunk.ParseExternalKey(i.tenantID, chunkID)
 	if err != nil {
 		logrus.WithField("chunk_id", chunkID).WithError(err).Errorln("unable to parse external key")
 		return
@@ -136,28 +136,20 @@ func (i *IndexValidator) checkEntry(
 		return
 	}
 
-	var chunkExists, ok bool
-	i.chunkIDMapMutex.RLock()
-	chunkExists, ok = i.chunkIDMap[chunkID]
-	i.chunkIDMapMutex.RUnlock()
+	var count int
+	err = i.o.readSession.Query(
+		fmt.Sprintf("SELECT count(*) FROM %s WHERE hash = ?", chunkTable),
+		c.ExternalKey(),
+	).WithContext(ctx).Scan(&count)
 
-	if !ok {
-		var count int
-		err = i.o.readSession.Query(
-			fmt.Sprintf("SELECT count(*) FROM %s WHERE hash = ?", chunkTable),
-			c.ExternalKey(),
-		).WithContext(ctx).Scan(&count)
-
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		chunkExists = count > 0
-		i.chunkIDMapMutex.Lock()
-		i.chunkIDMap[chunkID] = chunkExists
-		i.chunkIDMapMutex.Unlock()
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"chunk_id": chunkID,
+		}).WithError(err).Errorln("unable to read chunk table")
+		return
 	}
 
+	chunkExists := count > 0
 	if !chunkExists {
 		logrus.WithField("chunk_id", chunkID).Infoln("chunk not found, adding index entry to output file")
 		out <- fmt.Sprintf("%s,0x%x\n", string(entry.hash), entry.rangeValue)

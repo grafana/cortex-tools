@@ -144,6 +144,7 @@ type validateIndexCommandOptions struct {
 	FromTimestamp         int64
 	ToTimestamp           int64
 	InvalidIndexEntryFile string
+	TenantID              string
 }
 
 func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
@@ -153,7 +154,8 @@ func registerValidateIndexCommandOptions(cmd *kingpin.CmdClause) {
 	validateIndexCommand.Flag("invalid-entry-file", "Path to file where the hash and range values of invalid index entries will be written.").Default("invalid-entries.txt").StringVar(&opts.InvalidIndexEntryFile)
 	validateIndexCommand.Flag("table", "Cortex index table to scan for invalid index entries").Required().StringVar(&opts.Table)
 	validateIndexCommand.Flag("from-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("0").Int64Var(&opts.FromTimestamp)
-	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a minimum timestamp to scan for invalid entries.").Default("9223372036854775807").Int64Var(&opts.ToTimestamp)
+	validateIndexCommand.Flag("to-unix-timestamp", "Set a valid unix timestamp in seconds to configure a maximum timestamp to scan for invalid entries.").Default("9223372036854775807").Int64Var(&opts.ToTimestamp)
+	validateIndexCommand.Flag("tenant-id", "Tenant ID to scan entries for.").Default("fake").StringVar(&opts.TenantID)
 }
 
 // RegisterChunkCommands registers the ChunkCommand flags with the kingpin applicattion
@@ -604,7 +606,7 @@ func (v *validateIndexCommandOptions) run(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "failed to load schemas")
 	}
 
-	indexValidator, err := toolCassandra.NewIndexValidator(cortexCfg.Storage.CassandraStorageConfig, cortexCfg.Schema)
+	indexValidator, err := toolCassandra.NewIndexValidator(cortexCfg.Storage.CassandraStorageConfig, cortexCfg.Schema, v.TenantID)
 	if err != nil {
 		return err
 	}
