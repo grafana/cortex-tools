@@ -3,6 +3,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -213,7 +214,16 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 						return errors.New(fmt.Sprintf("invalid input line (%s)", line))
 					}
 
-					batch.Delete(c.table, strings.TrimSpace(parts[0]), []byte(strings.TrimSpace(parts[1])))
+					if parts[1][:2] == "0x" {
+						parts[1] = parts[1][2:]
+					}
+
+					data, err := hex.DecodeString(parts[1])
+					if err != nil {
+						return errors.New("invalid range value")
+					}
+
+					batch.Delete(c.table, strings.TrimSpace(parts[0]), data)
 					lineCnt++
 
 					if lineCnt >= c.batchSize {
