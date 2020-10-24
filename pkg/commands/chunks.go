@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
@@ -214,6 +215,8 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var totalLineCnt uint32
+
 	g, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < c.Concurrency; i++ {
 		g.Go(func() error {
@@ -257,6 +260,13 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 					batch = client.NewWriteBatch()
 					lineCnt = 0
 				}
+
+				newTotalLineCnt := atomic.AddUint32(&totalLineCnt, 1)
+				if newTotalLineCnt%25000 == 0 {
+					logrus.WithFields(logrus.Fields{
+						"entries_cleaned_up": newTotalLineCnt,
+					}).Infoln("cleanup progress")
+				}
 			}
 
 			writeBatch(ctx, client, batch)
@@ -275,6 +285,10 @@ func (c *chunkCleanCommandOptions) run(k *kingpin.ParseContext) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to delete invalid index entries")
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"entries_cleaned_up": totalLineCnt,
+	}).Infoln("cleanup complete")
 
 	return nil
 }
