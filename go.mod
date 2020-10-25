@@ -24,6 +24,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20200819132913-cb830b0a9c78
 	github.com/sirupsen/logrus v1.6.0
 	github.com/stretchr/testify v1.6.1
+	go.uber.org/atomic v1.6.0
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	google.golang.org/api v0.29.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6

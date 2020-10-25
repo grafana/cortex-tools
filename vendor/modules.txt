@@ -942,6 +942,7 @@ go.opentelemetry.io/otel/codes
 go.opentelemetry.io/otel/internal
 go.opentelemetry.io/otel/label
 # go.uber.org/atomic v1.6.0
+## explicit
 go.uber.org/atomic
 # go.uber.org/goleak v1.0.0
 go.uber.org/goleak
