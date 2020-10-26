@@ -25,7 +25,7 @@ func CheckLatest() {
 	if Version != "master" {
 		latest, err := getLatestFromGitHub()
 		if err != nil {
-			fmt.Println("unable to retrieve the latest version from GitHub")
+			fmt.Println(err)
 			return
 		}
 
