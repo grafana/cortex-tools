@@ -81,3 +81,12 @@ dockers:
     - "--label=org.opencontainers.image.version={{.Version}}"
     - "--label=repository=https://github.com/grafana/cortex-tools"
     - "--label=homepage=https://grafana.com"
+brews:
+  -
+    github:
+      owner: grafana
+      name: cortex-tools
+    homepage:  https://grafana.com
+    description: Tools for interacting with Cortex
+    install: |
+      bin.install "cortextool"
