@@ -52,6 +52,11 @@ archives:
     files:
       - none*
     format: binary
+  - id: needed-for-homebrew
+    builds:
+      - cortextool-linux
+      - cortextool-darwin
+    format: 'tar.gz'
 checksum:
   name_template: 'checksums.txt'
 snapshot:
