@@ -85,7 +85,7 @@ brews:
   -
     github:
       owner: grafana
-      name: cortex-tools
+      name: homebrew-grafana
     homepage:  https://grafana.com
     description: Tools for interacting with Cortex
     install: |
