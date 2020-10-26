@@ -10,7 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
+var (
 	errUnableToRetrieveLatestVersion = errors.New("unable to fetch the latest version from GitHub")
 )
 
