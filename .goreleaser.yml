@@ -83,7 +83,7 @@ dockers:
     - "--label=homepage=https://grafana.com"
 brews:
   -
-    github:
+    tap:
       owner: grafana
       name: homebrew-grafana
     homepage:  https://grafana.com
