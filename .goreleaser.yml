@@ -91,6 +91,9 @@ brews:
     tap:
       owner: grafana
       name: homebrew-grafana
+    commit_author:
+      name: cortex-tools-ci
+      email: support@grafana.com
     homepage:  https://grafana.com
     description: Tools for interacting with Cortex
     install: |
