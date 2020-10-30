@@ -33,6 +33,16 @@ Scrape                                              │                         
                                                     └─────────────────────────────────────┘
 ```
 
+## Installation
+
+### Compiling from source
+
+You can compile the binary directly by cloning this repo and running `make cmd/e2ealerting/e2ealerting`. The binary will be located in `cmd/e2ealerting/e2ealerting`.
+
+### Docker Image
+
+Docker images are part of [grafana/e2ealerting](https://hub.docker.com/repository/docker/grafana/e2ealerting/tags?page=1) in DockerHub.
+
 ## Configuration
 
 An example `e2ealerting` configuration would look like:
