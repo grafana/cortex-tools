@@ -48,7 +48,7 @@ An example `e2ealerting` configuration would look like:
 -configs.sync-interval=2h
 ```
 
-then the Alertmanager configuration file `alertmanger_config.yaml`:
+Then, the Alertmanager configuration file `alertmanger_config.yaml`:
 
 ```yaml
 global:
