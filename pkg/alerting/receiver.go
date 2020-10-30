@@ -155,9 +155,9 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 
 			latency := now.Unix() - int64(t)
 			r.mtx.Lock()
-			if _, exists := r.timestamps[t]; exists == true {
+			if _, exists := r.timestamps[t]; exists {
 				// We have seen this timestamp before, skip it.
-				level.Debug(r.logger).Log("msg", "timestap previously evaluated", "timestamp", t, "alert", name)
+				level.Debug(r.logger).Log("msg", "timestamp previously evaluated", "timestamp", t, "alert", name)
 				r.mtx.Unlock()
 				continue
 			}
