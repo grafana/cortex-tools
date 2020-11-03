@@ -15,7 +15,7 @@ const (
 )
 
 func main() {
-	fmt.Println("k, min, max, avg, std dev, tenants")
+	fmt.Println("k, min, max, avg, std dev, %tenants")
 	for k := 1000; k < 100000; k += 1000 {
 		run(float64(k))
 	}
@@ -42,7 +42,7 @@ func run(k float64) {
 	// TODO count tenants affected by double node outage.
 	maxAffectedTenants := 0
 	for i := 0; i < numReplicas; i++ {
-		for j := 0; i < numReplicas; j++ {
+		for j := 0; j < numReplicas; j++ {
 			tenants := 0
 
 			for k := 0; k < len(nodeTenants[i]); k++ {
@@ -59,7 +59,9 @@ func run(k float64) {
 		}
 	}
 
-	fmt.Printf("%.0f, %f, %f, %f, %f\n", k, min(nodeSeries), max(nodeSeries), stat.Mean(nodeSeries, nil), stat.StdDev(nodeSeries, nil), tenants)
+	fmt.Printf("%.0f, %f, %f, %f, %f, %f\n", k, min(nodeSeries), max(nodeSeries),
+		stat.Mean(nodeSeries, nil), stat.StdDev(nodeSeries, nil),
+		float64(maxAffectedTenants)/float64(numTenants))
 }
 
 func min(fs []float64) float64 {
