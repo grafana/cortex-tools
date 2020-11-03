@@ -16,18 +16,30 @@ const (
 
 func main() {
 	fmt.Println("k, min, max, avg, std dev, %tenants")
-	for k := 1000; k < 100000; k += 1000 {
-		run(float64(k))
+	for k := 1; k < 100; k += 1 {
+		run(k, log(k))
 	}
 }
 
-func run(k float64) {
+func linear(k int) func(float64) int {
+	return func(series float64) int {
+		return int(math.Ceil(series / float64(k)))
+	}
+}
+
+func log(k int) func(float64) int {
+	return func(series float64) int {
+		return int(math.Ceil(math.Log(series) / float64(k)))
+	}
+}
+
+func run(k int, sizer func(float64) int) {
 	nodeSeries := make([]float64, numReplicas)
 	nodeTenants := make([][]int, numReplicas)
 
 	for i := 0; i < numTenants; i++ {
 		series := rand.ExpFloat64() * avgSeries
-		shards := int(math.Ceil(series / k))
+		shards := sizer(series)
 		if shards > numReplicas {
 			shards = numReplicas
 		}
@@ -39,7 +51,7 @@ func run(k float64) {
 		}
 	}
 
-	// TODO count tenants affected by double node outage.
+	// Count tenants affected by double node outage.
 	maxAffectedTenants := 0
 	for i := 0; i < numReplicas; i++ {
 		for j := 0; j < numReplicas; j++ {
@@ -59,7 +71,7 @@ func run(k float64) {
 		}
 	}
 
-	fmt.Printf("%.0f, %f, %f, %f, %f, %f\n", k, min(nodeSeries), max(nodeSeries),
+	fmt.Printf("%d, %f, %f, %f, %f, %f\n", k, min(nodeSeries), max(nodeSeries),
 		stat.Mean(nodeSeries, nil), stat.StdDev(nodeSeries, nil),
 		float64(maxAffectedTenants)/float64(numTenants))
 }
