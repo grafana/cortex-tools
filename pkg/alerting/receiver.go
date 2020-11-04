@@ -125,49 +125,53 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 	for _, alert := range data.Alerts.Firing() {
 		var name string
 		for k, v := range alert.Labels {
-			if k == model.AlertNameLabel {
-				name = v
+			if k != model.AlertNameLabel {
+				continue
 			}
+
+			name = v
 		}
 
 		if name == "" {
-			level.Error(r.logger).Log("err", "alerts does not have an alertname label - we can't measure it", "labels", alert.Labels.Names())
+			level.Debug(r.logger).Log("err", "alerts does not have an alertname label - we can't measure it", "labels", alert.Labels.Names())
 			continue
 		}
 
 		var t float64
 		for k, v := range alert.Annotations {
-			if k == "time" {
-				timestamp, err := strconv.ParseFloat(v, 64)
-				if err != nil {
-					level.Error(r.logger).Log("msg", "failed to parse the timestamp of the alert", "alert", name)
-					r.failedEvalTotal.Inc()
-					continue
-				}
-
-				t = timestamp
-			}
-
-			if t == 0.0 {
-				level.Error(r.logger).Log("msg", "alert does not have a `time` annonnation - we can't measure it", "labels", alert.Labels.Names(), "annonnations", alert.Labels.Names())
+			if k != "time" {
 				continue
 			}
 
-			latency := now.Unix() - int64(t)
-			r.mtx.Lock()
-			if _, exists := r.timestamps[t]; exists {
-				// We have seen this timestamp before, skip it.
-				level.Debug(r.logger).Log("msg", "timestamp previously evaluated", "timestamp", t, "alert", name)
-				r.mtx.Unlock()
+			timestamp, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				level.Error(r.logger).Log("msg", "failed to parse the timestamp of the alert", "alert", name)
+				r.failedEvalTotal.Inc()
 				continue
 			}
-			r.timestamps[t] = struct{}{}
-			r.mtx.Unlock()
 
-			r.roundtripDuration.WithLabelValues(name).Observe(float64(latency))
-			level.Info(r.logger).Log("alert", name, "time", time.Unix(int64(t), 0), "duration_seconds", latency, "status", alert.Status)
-			r.evalTotal.Inc()
+			t = timestamp
 		}
+
+		if t == 0.0 {
+			level.Debug(r.logger).Log("msg", "alert does not have a `time` annonnation - we can't measure it", "labels", alert.Labels.Names(), "annonnations", alert.Annotations.Names())
+			continue
+		}
+
+		latency := now.Unix() - int64(t)
+		r.mtx.Lock()
+		if _, exists := r.timestamps[t]; exists {
+			// We have seen this timestamp before, skip it.
+			level.Debug(r.logger).Log("msg", "timestamp previously evaluated", "timestamp", t, "alert", name)
+			r.mtx.Unlock()
+			continue
+		}
+		r.timestamps[t] = struct{}{}
+		r.mtx.Unlock()
+
+		r.roundtripDuration.WithLabelValues(name).Observe(float64(latency))
+		level.Info(r.logger).Log("alert", name, "time", time.Unix(int64(t), 0), "duration_seconds", latency, "status", alert.Status)
+		r.evalTotal.Inc()
 	}
 
 	w.WriteHeader(http.StatusOK)

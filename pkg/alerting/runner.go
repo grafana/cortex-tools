@@ -179,6 +179,11 @@ func (r *Runner) Collect(c chan<- prometheus.Metric) {
 func (r *Runner) pushRulerAndAMConfig() {
 	defer r.wg.Add(-1)
 
+	if r.amConfig == nil && len(r.rulerConfig.Rules) == 0 {
+		level.Info(r.logger).Log("msg", "no ruler or Alertmanager configuration - skipping sync")
+		return
+	}
+
 	level.Info(r.logger).Log("msg", "starting sync with Alertmanager and ruler")
 	r.syncRuler()
 	r.syncAlertmanager()
