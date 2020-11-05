@@ -86,6 +86,6 @@ rules:
   - alert: E2EAlertingAlwaysFiring
     annotations:
         time: '{{ $value }}'
-    expr: e2ealerting_now_in_seconds > 
+    expr: e2ealerting_now_in_seconds > 0
     for: 10s
 ```
