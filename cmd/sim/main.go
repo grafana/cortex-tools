@@ -9,15 +9,28 @@ import (
 )
 
 const (
-	numTenants  = 1000
-	avgSeries   = 10000
-	numReplicas = 10
+	numTenants        = 1000
+	avgSeries         = 100000 // After replication
+	numReplicas       = 100
+	replicationFactor = 3
+	function          = "linear"
 )
 
 func main() {
-	fmt.Println("k, min, max, avg, std dev, %tenants")
-	for k := 1; k < 100; k += 1 {
-		run(k, log(k))
+	// Print CSV header.
+	fmt.Println(fmt.Sprintf(
+		"k, min, max, avg, std dev, %% tenants affected by double node outage, setup = %s function / %d tenants / %d avg series per tenant / %d replicas / %dx replication factor",
+		function, numTenants, avgSeries, numReplicas, replicationFactor))
+
+	switch function {
+	case "linear":
+		for k := 1000; k <= 100000; k += 1000 {
+			run(k, linear(k))
+		}
+	case "log":
+		for k := 1; k <= 100; k += 1 {
+			run(k, log(k))
+		}
 	}
 }
 
@@ -37,24 +50,50 @@ func run(k int, sizer func(float64) int) {
 	nodeSeries := make([]float64, numReplicas)
 	nodeTenants := make([][]int, numReplicas)
 
-	for i := 0; i < numTenants; i++ {
-		series := rand.ExpFloat64() * avgSeries
-		shards := sizer(series)
-		if shards > numReplicas {
-			shards = numReplicas
+	// Simulate the distribution of tenants across replicas.
+	for tenantID := 0; tenantID < numTenants; tenantID++ {
+		// Seed the pseudo-random generator with the tenant ID, so that different runs
+		// get the same number of series for the same tenant.
+		entropy := rand.New(rand.NewSource(int64(tenantID)))
+
+		numSeries := entropy.ExpFloat64() * avgSeries
+
+		shardSize := sizer(numSeries)
+		if shardSize > numReplicas {
+			shardSize = numReplicas
+		} else if shardSize < replicationFactor {
+			shardSize = replicationFactor
 		}
 
-		for j := 0; j < shards; j++ {
-			shard := rand.Intn(numReplicas)
-			nodeSeries[shard] += series / float64(shards)
-			nodeTenants[shard] = append(nodeTenants[shard], i)
+		replicaIDs := shuffleShard(entropy, shardSize, numReplicas)
+		for _, replicaID := range replicaIDs {
+			nodeSeries[replicaID] += numSeries / float64(shardSize)
+			nodeTenants[replicaID] = append(nodeTenants[replicaID], tenantID)
 		}
 	}
 
 	// Count tenants affected by double node outage.
+	maxAffectedTenants := calculateMaxAffectedTenants(nodeTenants)
+
+	fmt.Printf("%d, %d, %d, %d, %f, %f\n",
+		k,
+		int(min(nodeSeries)),
+		int(max(nodeSeries)),
+		int(stat.Mean(nodeSeries, nil)),
+		stat.StdDev(nodeSeries, nil),
+		float64(maxAffectedTenants)/float64(numTenants))
+}
+
+func calculateMaxAffectedTenants(nodeTenants [][]int) int {
 	maxAffectedTenants := 0
-	for i := 0; i < numReplicas; i++ {
-		for j := 0; j < numReplicas; j++ {
+
+	for i := 0; i < len(nodeTenants); i++ {
+		for j := 0; j < len(nodeTenants); j++ {
+			// Skip the same node.
+			if i == j {
+				continue
+			}
+
 			tenants := 0
 
 			for k := 0; k < len(nodeTenants[i]); k++ {
@@ -71,9 +110,23 @@ func run(k int, sizer func(float64) int) {
 		}
 	}
 
-	fmt.Printf("%d, %f, %f, %f, %f, %f\n", k, min(nodeSeries), max(nodeSeries),
-		stat.Mean(nodeSeries, nil), stat.StdDev(nodeSeries, nil),
-		float64(maxAffectedTenants)/float64(numTenants))
+	return maxAffectedTenants
+}
+
+func shuffleShard(entropy *rand.Rand, shardSize, numReplicas int) []int {
+	// Randomly pick shardSize different replicas.
+	replicas := map[int]struct{}{}
+	for len(replicas) < shardSize {
+		replicas[entropy.Intn(numReplicas)] = struct{}{}
+	}
+
+	// Build the list of replica IDs for this tenant.
+	ids := make([]int, 0, len(replicas))
+	for id := range replicas {
+		ids = append(ids, id)
+	}
+
+	return ids
 }
 
 func min(fs []float64) float64 {
