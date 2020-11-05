@@ -18,9 +18,9 @@ const (
 
 func main() {
 	// Print CSV header.
-	fmt.Println(fmt.Sprintf(
-		"k, min, max, avg, std dev, %% tenants affected by double node outage, setup = %s function / %d tenants / %d avg series per tenant / %d replicas / %dx replication factor",
-		function, numTenants, avgSeries, numReplicas, replicationFactor))
+	fmt.Printf(
+		"k, min, max, avg, std dev, %% tenants affected by double node outage, setup = %s function / %d tenants / %d avg series per tenant / %d replicas / %dx replication factor\n",
+		function, numTenants, avgSeries, numReplicas, replicationFactor)
 
 	switch function {
 	case "linear":
@@ -28,7 +28,7 @@ func main() {
 			run(k, linear(k))
 		}
 	case "log":
-		for k := 1; k <= 100; k += 1 {
+		for k := 1; k <= 100; k++ {
 			run(k, log(k))
 		}
 	}
