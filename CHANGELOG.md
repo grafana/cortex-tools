@@ -1,5 +1,16 @@
 # Changelog
 
+
+## Unreleased
+
+* [FEATURE] Release `cortextool` via Homebrew for macOS #109
+* [BUGFIX] Do not panic if we're unable to contact GitHub for the `version` command. #107
+
+## v0.4.1
+
+* [ENHANCEMENT] Upgrade the Go version used in build images and tests to golang 1.14.9 to match upstream Cortex. #104
+* [FEATURE] Add `chunktool chunk validate-index` and `chunktool chunk clean-index` commands to the chunktool. These commands are used to scan Cortex index backends for invalid index entries. #104
+
 ## v0.4.0
 
 * [ENHANCEMENT] Loadgen: Allow users to selectively disable query or write loadgen by leaving their respective URL configs empty. #95

@@ -6,6 +6,23 @@ This repo contains tools used for interacting with [Cortex](https://github.com/c
 * [chunktool](#chunktool): Interacts with chunks stored and indexed in Cortex storage backends.
 * [logtool](#logtool): Tool which parses Cortex query-frontend logs and formats them for easy analysis.
 
+
+# Installation
+
+The various binaries are available for macOS, Windows, and Linux.
+
+## macOS
+
+`cortextool` is available on macOS via [Homebrew](https://brew.sh/):
+
+```bash
+$ brew install grafana/grafana/cortextool
+```
+
+## Linux, Docker and Windows
+
+Refer to the [latest release](https://github.com/grafana/cortex-tools/releases) for installation intructions on these.
+
 ## cortextool
 
 This tool is designed to interact with the various user-facing APIs provided by Cortex, as well as, interact with various backend storage components containing Cortex data.
@@ -121,6 +138,10 @@ The migrate command helps with migrating chunks across cortex clusters. It also 
 
 As of now it only supports `Bigtable` or `GCS` as a source to read chunks from for migration while for writing it supports all the storages that Cortex supports.
 More details about it [here](./pkg/chunk/migrate/README.md)
+
+##### Chunk Validate/Clean-Index
+
+The `chunk validate-index` and `chunk clean-index` command allows users to scan their index and chunk backends for invalid entries. The `validate-index` command will find invalid entries and ouput them to a CSV file. The `clean-index` command will take that CSV file as input and delete the invalid entries.
 
 ## logtool
 

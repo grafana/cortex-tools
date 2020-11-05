@@ -15,7 +15,7 @@ var (
 
 func main() {
 	kingpin.Version("0.0.1")
-	app := kingpin.New("cortextool", "A command-line tool to manage cortex chunk backends.")
+	app := kingpin.New("chunktool", "A command-line tool to manage cortex chunk backends.")
 	logConfig.Register(app)
 	commands.RegisterChunkCommands(app)
 	pushGateway.Register(app)
