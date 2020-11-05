@@ -4,23 +4,48 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 
 	"github.com/gonum/stat"
 )
 
 const (
 	numTenants        = 1000
-	avgSeries         = 100000 // After replication
 	numReplicas       = 100
 	replicationFactor = 3
 	function          = "linear"
 )
 
+var (
+	// Must be sorted by increasing avgSeries.
+	tenantsDistribution = []struct {
+		name       string
+		percentage float64
+		avgSeries  int // After replication
+	}{
+		{
+			name:       "small",
+			percentage: 0.7,
+			avgSeries:  10000,
+		},
+		{
+			name:       "medium",
+			percentage: 0.2,
+			avgSeries:  100000,
+		},
+		{
+			name:       "large",
+			percentage: 0.1,
+			avgSeries:  1000000,
+		},
+	}
+)
+
 func main() {
 	// Print CSV header.
 	fmt.Printf(
-		"k, min, max, avg, std dev, %% tenants affected by double node outage, setup = %s function / %d tenants / %d avg series per tenant / %d replicas / %dx replication factor\n",
-		function, numTenants, avgSeries, numReplicas, replicationFactor)
+		"k, min series / replica, max series / replica, avg series / replica, std dev series, %% tenants affected by double node outage, setup = %s function / %d tenants / %s / %d replicas / %dx replication factor\n",
+		function, numTenants, tenantsDistributionToString(), numReplicas, replicationFactor)
 
 	switch function {
 	case "linear":
@@ -51,24 +76,38 @@ func run(k int, sizer func(float64) int) {
 	nodeTenants := make([][]int, numReplicas)
 
 	// Simulate the distribution of tenants across replicas.
-	for tenantID := 0; tenantID < numTenants; tenantID++ {
-		// Seed the pseudo-random generator with the tenant ID, so that different runs
-		// get the same number of series for the same tenant.
-		entropy := rand.New(rand.NewSource(int64(tenantID)))
+	tenantID := 0
 
-		numSeries := entropy.ExpFloat64() * avgSeries
+	for classIdx, class := range tenantsDistribution {
+		for n := 0; n < int(float64(numTenants)*class.percentage); n++ {
+			// Seed the pseudo-random generator with the tenant ID, so that different runs
+			// get the same number of series for the same tenant.
+			entropy := rand.New(rand.NewSource(int64(tenantID)))
 
-		shardSize := sizer(numSeries)
-		if shardSize > numReplicas {
-			shardSize = numReplicas
-		} else if shardSize < replicationFactor {
-			shardSize = replicationFactor
-		}
+			// Get the average series of the previous class.
+			prevClassAvgSeries := 0
+			if classIdx > 0 {
+				prevClassAvgSeries = tenantsDistribution[classIdx-1].avgSeries
+			}
 
-		replicaIDs := shuffleShard(entropy, shardSize, numReplicas)
-		for _, replicaID := range replicaIDs {
-			nodeSeries[replicaID] += numSeries / float64(shardSize)
-			nodeTenants[replicaID] = append(nodeTenants[replicaID], tenantID)
+			// Compute a random number of series for the tenant, ensuring it's greater than
+			// the previous class.
+			numSeries := float64(prevClassAvgSeries) + (entropy.ExpFloat64() * float64(class.avgSeries-prevClassAvgSeries))
+
+			shardSize := sizer(numSeries)
+			if shardSize > numReplicas {
+				shardSize = numReplicas
+			} else if shardSize < replicationFactor {
+				shardSize = replicationFactor
+			}
+
+			replicaIDs := shuffleShard(entropy, shardSize, numReplicas)
+			for _, replicaID := range replicaIDs {
+				nodeSeries[replicaID] += numSeries / float64(shardSize)
+				nodeTenants[replicaID] = append(nodeTenants[replicaID], tenantID)
+			}
+
+			tenantID++
 		}
 	}
 
@@ -147,4 +186,18 @@ func max(fs []float64) float64 {
 		}
 	}
 	return result
+}
+
+func tenantsDistributionToString() string {
+	out := strings.Builder{}
+
+	for _, t := range tenantsDistribution {
+		if out.Len() > 0 {
+			out.WriteString(" + ")
+		}
+
+		out.WriteString(fmt.Sprintf("%.0f%% %s with %dK avg series", t.percentage*100, t.name, t.avgSeries/1000))
+	}
+
+	return out.String()
 }
