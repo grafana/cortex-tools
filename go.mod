@@ -20,6 +20,7 @@ require (
 	github.com/gonum/matrix v0.0.0-20181209220409-c518dec07be9 // indirect
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b
 	github.com/google/go-github/v32 v32.1.0
+	github.com/gorilla/mux v1.7.3
 	github.com/grafana/loki v1.6.2-0.20200923203102-89b8ae4b4981
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.2.0
@@ -30,8 +31,11 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20200819132913-cb830b0a9c78
 	github.com/sirupsen/logrus v1.6.0
 	github.com/stretchr/testify v1.6.1
+	github.com/weaveworks/common v0.0.0-20200914083218-61ffdd448099
 	go.uber.org/atomic v1.6.0
-	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
+	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
+	golang.org/x/text v0.3.4 // indirect
+	golang.org/x/tools v0.0.0-20201030143252-cf7a54d06671 // indirect
 	google.golang.org/api v0.29.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.3.0
