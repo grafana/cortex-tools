@@ -253,8 +253,6 @@ github.com/fatih/color
 github.com/felixge/fgprof
 # github.com/felixge/httpsnoop v1.0.1
 github.com/felixge/httpsnoop
-# github.com/frankban/quicktest v1.7.2
-## explicit
 # github.com/fsouza/fake-gcs-server v1.7.0
 github.com/fsouza/fake-gcs-server/fakestorage
 github.com/fsouza/fake-gcs-server/internal/backend
@@ -355,6 +353,8 @@ github.com/gonum/blas/native/internal/math32
 # github.com/gonum/floats v0.0.0-20181209220543-c233463c7e82
 ## explicit
 github.com/gonum/floats
+# github.com/gonum/integrate v0.0.0-20181209220457-a422b5c0fdf2
+## explicit
 # github.com/gonum/internal v0.0.0-20181124074243-f884aa714029
 ## explicit
 github.com/gonum/internal/asm/f32
@@ -542,8 +542,6 @@ github.com/opentracing-contrib/go-stdlib/nethttp
 github.com/opentracing/opentracing-go
 github.com/opentracing/opentracing-go/ext
 github.com/opentracing/opentracing-go/log
-# github.com/pierrec/lz4 v2.5.3-0.20200429092203-e876bbd321b3+incompatible
-## explicit
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
@@ -1148,7 +1146,7 @@ sigs.k8s.io/yaml
 # github.com/Azure/azure-sdk-for-go => github.com/Azure/azure-sdk-for-go v36.2.0+incompatible
 # git.apache.org/thrift.git => github.com/apache/thrift v0.0.0-20180902110319-2566ecd5d999
 # github.com/satori/go.uuid => github.com/satori/go.uuid v1.2.0
-# k8s.io/client-go => k8s.io/client-go v0.18.3
+# k8s.io/client-go => k8s.io/client-go v0.19.2
 # github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
 # github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
 # google.golang.org/grpc => google.golang.org/grpc v1.29.1

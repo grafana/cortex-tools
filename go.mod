@@ -9,13 +9,13 @@ require (
 	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
 	github.com/cortexproject/cortex v1.4.1-0.20201022071705-85942c5703cf
 	github.com/dlclark/regexp2 v1.2.0 // indirect
-	github.com/frankban/quicktest v1.7.2 // indirect
 	github.com/go-kit/kit v0.10.0
 	github.com/gocql/gocql v0.0.0-20200526081602-cd04bd7f22a7
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/snappy v0.0.2
 	github.com/gonum/blas v0.0.0-20181208220705-f22b278b28ac // indirect
 	github.com/gonum/floats v0.0.0-20181209220543-c233463c7e82 // indirect
+	github.com/gonum/integrate v0.0.0-20181209220457-a422b5c0fdf2 // indirect
 	github.com/gonum/internal v0.0.0-20181124074243-f884aa714029 // indirect
 	github.com/gonum/lapack v0.0.0-20181123203213-e4cdc5a0bff9 // indirect
 	github.com/gonum/matrix v0.0.0-20181209220409-c518dec07be9 // indirect
@@ -25,7 +25,6 @@ require (
 	github.com/grafana/loki v1.6.2-0.20201117140412-14a5fda15b07
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing/opentracing-go v1.2.0
-	github.com/pierrec/lz4 v2.5.3-0.20200429092203-e876bbd321b3+incompatible // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/alertmanager v0.21.1-0.20200911160112-1fdff6b3f939
 	github.com/prometheus/client_golang v1.7.1
@@ -52,7 +51,8 @@ replace git.apache.org/thrift.git => github.com/apache/thrift v0.0.0-20180902110
 
 replace github.com/satori/go.uuid => github.com/satori/go.uuid v1.2.0
 
-replace k8s.io/client-go => k8s.io/client-go v0.18.3
+// Keeping this same as Cortex to avoid dependency issues.
+replace k8s.io/client-go => k8s.io/client-go v0.19.2
 
 // Use fork of gocql that has gokit logs and Prometheus metrics.
 replace github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
