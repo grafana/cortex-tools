@@ -60,7 +60,7 @@ func main() {
 	ctx := context.Background()
 
 	log.Println("listing source rules")
-	rgs, _, err := srcClient.List(ctx, "rules/")
+	rgs, _, err := srcClient.List(ctx, "rules/", "")
 	if err != nil {
 		log.Fatalf("unable to list source rules, %v", err)
 	}
@@ -97,11 +97,11 @@ func main() {
 func newClient(cfg ObjStoreConfig) (chunk.ObjectClient, error) {
 	switch cfg.Type {
 	case "azure":
-		return azure.NewBlobStorage(&cfg.Azure, "")
+		return azure.NewBlobStorage(&cfg.Azure)
 	case "gcs":
-		return gcp.NewGCSObjectClient(context.Background(), cfg.GCS, "")
+		return gcp.NewGCSObjectClient(context.Background(), cfg.GCS)
 	case "s3":
-		return aws.NewS3ObjectClient(cfg.S3, "")
+		return aws.NewS3ObjectClient(cfg.S3)
 	default:
 		return nil, fmt.Errorf("Unrecognized rule storage mode %v, choose one of: configdb, gcs, s3, swift, azure", cfg.Type)
 	}
