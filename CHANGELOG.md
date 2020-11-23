@@ -4,7 +4,8 @@
 ## Unreleased
 
 * [BUGFIX] Fix inaccuracy in `e2ealerting` caused by invalid purging condition on timestamps. #117
-
+* [ENHANCEMENT] Add `--use-legacy-routes` flag to `rules` #99
+  
 ## v0.5.0
 
 * [FEATURE] Release `cortextool` via Homebrew for macOS #109
