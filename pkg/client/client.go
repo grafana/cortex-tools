@@ -21,10 +21,11 @@ var (
 
 // Config is used to configure a Ruler Client
 type Config struct {
-	Key     string `yaml:"key"`
-	Address string `yaml:"address"`
-	ID      string `yaml:"id"`
-	TLS     tls.ClientConfig
+	Key             string `yaml:"key"`
+	Address         string `yaml:"address"`
+	ID              string `yaml:"id"`
+	TLS             tls.ClientConfig
+	UseLegacyRoutes string `yaml:"use_legacy_routes"`
 }
 
 // CortexClient is used to get and load rules into a cortex ruler
@@ -33,6 +34,7 @@ type CortexClient struct {
 	id       string
 	endpoint *url.URL
 	client   http.Client
+	legacy   bool
 }
 
 // New returns a new Client
@@ -65,11 +67,14 @@ func New(cfg Config) (*CortexClient, error) {
 		client = http.Client{Transport: transport}
 	}
 
+	legacy := cfg.UseLegacyRoutes == "true"
+
 	return &CortexClient{
 		key:      cfg.Key,
 		id:       cfg.ID,
 		endpoint: endpoint,
 		client:   client,
+		legacy:   legacy,
 	}, nil
 }
 

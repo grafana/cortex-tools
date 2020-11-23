@@ -12,7 +12,10 @@ import (
 	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 )
 
-const rulerAPIPath = "/api/v1/rules"
+const (
+	rulerAPIPath  = "/api/v1/rules"
+	legacyAPIPath = "/api/prom/rules"
+)
 
 // CreateRuleGroup creates a new rule group
 func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg rwrulefmt.RuleGroup) error {
@@ -21,8 +24,18 @@ func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg
 		return err
 	}
 
+	path := rulerAPIPath
+	if r.legacy {
+		path = legacyAPIPath
+	}
 	escapedNamespace := url.PathEscape(namespace)
-	res, err := r.doRequest(rulerAPIPath+"/"+escapedNamespace, "POST", payload)
+	path += "/" + escapedNamespace
+
+	log.WithFields(log.Fields{
+		"url": path,
+	}).Debugln("path built to request rule group")
+
+	res, err := r.doRequest(path, "POST", payload)
 	if err != nil {
 		return err
 	}
@@ -34,18 +47,31 @@ func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg
 
 // DeleteRuleGroup creates a new rule group
 func (r *CortexClient) DeleteRuleGroup(ctx context.Context, namespace, groupName string) error {
+	path := rulerAPIPath
+	if r.legacy {
+		path = legacyAPIPath
+	}
 	escapedNamespace := url.PathEscape(namespace)
 	escapedGroupName := url.PathEscape(groupName)
+	path += "/" + escapedNamespace + "/" + escapedGroupName
 
-	_, err := r.doRequest(rulerAPIPath+"/"+escapedNamespace+"/"+escapedGroupName, "DELETE", nil)
+	log.WithFields(log.Fields{
+		"url": path,
+	}).Debugln("path built to request rule group")
+
+	_, err := r.doRequest(path, "DELETE", nil)
 	return err
 }
 
 // GetRuleGroup retrieves a rule group
 func (r *CortexClient) GetRuleGroup(ctx context.Context, namespace, groupName string) (*rwrulefmt.RuleGroup, error) {
+	path := rulerAPIPath
+	if r.legacy {
+		path = legacyAPIPath
+	}
 	escapedNamespace := url.PathEscape(namespace)
 	escapedGroupName := url.PathEscape(groupName)
-	path := rulerAPIPath + "/" + escapedNamespace + "/" + escapedGroupName
+	path += "/" + escapedNamespace + "/" + escapedGroupName
 
 	log.WithFields(log.Fields{
 		"url": path,
@@ -79,9 +105,16 @@ func (r *CortexClient) GetRuleGroup(ctx context.Context, namespace, groupName st
 // ListRules retrieves a rule group
 func (r *CortexClient) ListRules(ctx context.Context, namespace string) (map[string][]rwrulefmt.RuleGroup, error) {
 	path := rulerAPIPath
+	if r.legacy {
+		path = legacyAPIPath
+	}
 	if namespace != "" {
 		path = path + "/" + namespace
 	}
+
+	log.WithFields(log.Fields{
+		"url": path,
+	}).Debugln("path built to request rule group")
 
 	res, err := r.doRequest(path, "GET", nil)
 	if err != nil {
