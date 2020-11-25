@@ -124,10 +124,10 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 			Required().
 			StringVar(&r.ClientConfig.ID)
 
-		c.Flag("use-legacy-routes", "Use new or legacy ruotes to request cortex, alternatively set CORTEX_USE_LEGACY_ROUTES.").
+		c.Flag("use-legacy-routes", "If set, API requests to cortex will use the legacy /api/prom/ routes, alternatively set CORTEX_USE_LEGACY_ROUTES.").
 			Default("false").
 			Envar("CORTEX_USE_LEGACY_ROUTES").
-			EnumVar(&r.ClientConfig.UseLegacyRoutes, []string{"false", "true"}...)
+			BoolVar(&r.ClientConfig.UseLegacyRoutes)
 
 		c.Flag("tls-ca-path", "TLS CA certificate to verify cortex API as part of mTLS, alternatively set CORTEX_TLS_CA_PATH.").
 			Default("").
