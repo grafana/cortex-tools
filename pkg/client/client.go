@@ -34,7 +34,7 @@ type CortexClient struct {
 	id       string
 	endpoint *url.URL
 	client   http.Client
-	apiPath string
+	apiPath  string
 }
 
 // New returns a new Client
