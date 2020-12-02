@@ -14,6 +14,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	rulerAPIPath  = "/api/v1/rules"
+	legacyAPIPath = "/api/prom/rules"
+)
+
 var (
 	ErrNoConfig         = errors.New("No config exists for this user")
 	ErrResourceNotFound = errors.New("requested resource not found")

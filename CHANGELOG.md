@@ -4,8 +4,7 @@
 ## Unreleased
 
 * [BUGFIX] Fix inaccuracy in `e2ealerting` caused by invalid purging condition on timestamps. #117
-* [CHANGE] When using `rules` commands, cortex ruler API requests will now default to using the `/api/v1/` prefix. 
-The `--use-legacy-routes` flag has been added to allow users to use the original `/api/prom/` routes. #99
+* [CHANGE] When using `rules` commands, cortex ruler API requests will now default to using the `/api/v1/` prefix. The `--use-legacy-routes` flag has been added to allow users to use the original `/api/prom/` routes. #99
   
 ## v0.5.0
 
