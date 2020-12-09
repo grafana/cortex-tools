@@ -482,6 +482,10 @@ func (r *RuleCommand) syncRules(k *kingpin.ParseContext) error {
 	changes := []rules.NamespaceChange{}
 
 	for _, ns := range nss {
+		if !r.shouldCheckNamespace(ns.Namespace) {
+			continue
+		}
+
 		currentNamespace, exists := currentNamespaceMap[ns.Namespace]
 		if !exists {
 			changes = append(changes, rules.NamespaceChange{
@@ -504,13 +508,15 @@ func (r *RuleCommand) syncRules(k *kingpin.ParseContext) error {
 	}
 
 	for ns, deletedGroups := range currentNamespaceMap {
-		if _, ignored := r.ignoredNamespacesMap[ns]; !ignored {
-			changes = append(changes, rules.NamespaceChange{
-				State:         rules.Deleted,
-				Namespace:     ns,
-				GroupsDeleted: deletedGroups,
-			})
+		if !r.shouldCheckNamespace(ns) {
+			continue
 		}
+
+		changes = append(changes, rules.NamespaceChange{
+			State:         rules.Deleted,
+			Namespace:     ns,
+			GroupsDeleted: deletedGroups,
+		})
 	}
 
 	err = r.executeChanges(context.Background(), changes)
