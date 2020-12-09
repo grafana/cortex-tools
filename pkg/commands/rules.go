@@ -396,7 +396,7 @@ func (r *RuleCommand) loadRules(k *kingpin.ParseContext) error {
 
 // shouldCheckNamespace returns whether the namespace should be checked according to the allowed and ignored namespaces
 func (r *RuleCommand) shouldCheckNamespace(namespace string) bool {
-       // when we have an allow list, only check those that we have explicitly defined.
+	// when we have an allow list, only check those that we have explicitly defined.
 	if r.namespacesMap != nil {
 		_, allowed := r.namespacesMap[namespace]
 		return allowed
