@@ -159,6 +159,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	loadRulesCmd.Arg("rule-files", "The rule files to check.").Required().ExistingFilesVar(&r.RuleFilesList)
 
 	// Diff Command
+	diffRulesCmd.Arg("rule-files", "The rule files to check.").ExistingFilesVar(&r.RuleFilesList)
 	diffRulesCmd.Flag("namespaces", "comma-separated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
 	diffRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a diff. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	diffRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
@@ -169,6 +170,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	diffRulesCmd.Flag("disable-color", "disable colored output").BoolVar(&r.DisableColor)
 
 	// Sync Command
+	syncRulesCmd.Arg("rule-files", "The rule files to check.").ExistingFilesVar(&r.RuleFilesList)
 	syncRulesCmd.Flag("namespaces", "comma-separated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
 	syncRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a sync. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	syncRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
@@ -531,6 +533,10 @@ func (r *RuleCommand) executeChanges(ctx context.Context, changes []rules.Namesp
 	var err error
 	for _, ch := range changes {
 		for _, g := range ch.GroupsCreated {
+			if !r.shouldCheckNamespace(ch.Namespace) {
+				continue
+			}
+
 			log.WithFields(log.Fields{
 				"group":     g.Name,
 				"namespace": ch.Namespace,
@@ -542,6 +548,10 @@ func (r *RuleCommand) executeChanges(ctx context.Context, changes []rules.Namesp
 		}
 
 		for _, g := range ch.GroupsUpdated {
+			if !r.shouldCheckNamespace(ch.Namespace) {
+				continue
+			}
+
 			log.WithFields(log.Fields{
 				"group":     g.New.Name,
 				"namespace": ch.Namespace,
@@ -553,6 +563,10 @@ func (r *RuleCommand) executeChanges(ctx context.Context, changes []rules.Namesp
 		}
 
 		for _, g := range ch.GroupsDeleted {
+			if !r.shouldCheckNamespace(ch.Namespace) {
+				continue
+			}
+
 			log.WithFields(log.Fields{
 				"group":     g.Name,
 				"namespace": ch.Namespace,
