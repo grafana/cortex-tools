@@ -58,6 +58,8 @@ type RuleCommand struct {
 	RuleFilesPath string
 
 	// Sync/Diff Rules Config
+	Namespaces           string
+	namespacesMap        map[string]struct{}
 	IgnoredNamespaces    string
 	ignoredNamespacesMap map[string]struct{}
 
@@ -157,7 +159,8 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	loadRulesCmd.Arg("rule-files", "The rule files to check.").Required().ExistingFilesVar(&r.RuleFilesList)
 
 	// Diff Command
-	diffRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a diff.").StringVar(&r.IgnoredNamespaces)
+	diffRulesCmd.Flag("namespaces", "comma-seperated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
+	diffRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a diff. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	diffRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
 	diffRulesCmd.Flag(
 		"rule-dirs",
@@ -166,7 +169,8 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	diffRulesCmd.Flag("disable-color", "disable colored output").BoolVar(&r.DisableColor)
 
 	// Sync Command
-	syncRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a sync.").StringVar(&r.IgnoredNamespaces)
+	syncRulesCmd.Flag("namespaces", "comma-seperated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
+	syncRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a sync. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	syncRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
 	syncRulesCmd.Flag(
 		"rule-dirs",
@@ -221,11 +225,27 @@ func (r *RuleCommand) setup(k *kingpin.ParseContext) error {
 }
 
 func (r *RuleCommand) setupFiles() error {
+	if r.Namespaces != "" && r.IgnoredNamespaces != "" {
+		return errors.New("--namespaces and --ignored-namespaces cannot be set at the same time.")
+	}
+
 	// Set up ignored namespaces map for sync/diff command
-	r.ignoredNamespacesMap = map[string]struct{}{}
-	for _, ns := range strings.Split(r.IgnoredNamespaces, ",") {
-		if ns != "" {
-			r.ignoredNamespacesMap[ns] = struct{}{}
+	if r.IgnoredNamespaces != "" {
+		r.ignoredNamespacesMap = map[string]struct{}{}
+		for _, ns := range strings.Split(r.IgnoredNamespaces, ",") {
+			if ns != "" {
+				r.ignoredNamespacesMap[ns] = struct{}{}
+			}
+		}
+	}
+
+	// Set up allowed namespaces map for sync/diff command
+	if r.Namespaces != "" {
+		r.namespacesMap = map[string]struct{}{}
+		for _, ns := range strings.Split(r.Namespaces, ",") {
+			if ns != "" {
+				r.namespacesMap[ns] = struct{}{}
+			}
 		}
 	}
 
@@ -372,6 +392,17 @@ func (r *RuleCommand) loadRules(k *kingpin.ParseContext) error {
 	return nil
 }
 
+// shouldCheckNamespace returns whether the namespace should be checked according to the allowed and ignored namespaces
+func (r *RuleCommand) shouldCheckNamespace(namespace string) bool {
+	if r.namespacesMap != nil {
+		_, allowed := r.namespacesMap[namespace]
+		return allowed
+	}
+
+	_, ignored := r.ignoredNamespacesMap[namespace]
+	return !ignored
+}
+
 func (r *RuleCommand) diffRules(k *kingpin.ParseContext) error {
 	err := r.setupFiles()
 	if err != nil {
@@ -391,6 +422,10 @@ func (r *RuleCommand) diffRules(k *kingpin.ParseContext) error {
 	changes := []rules.NamespaceChange{}
 
 	for _, ns := range nss {
+		if !r.shouldCheckNamespace(ns.Namespace) {
+			continue
+		}
+
 		currentNamespace, exists := currentNamespaceMap[ns.Namespace]
 		if !exists {
 			changes = append(changes, rules.NamespaceChange{
@@ -413,13 +448,15 @@ func (r *RuleCommand) diffRules(k *kingpin.ParseContext) error {
 	}
 
 	for ns, deletedGroups := range currentNamespaceMap {
-		if _, ignored := r.ignoredNamespacesMap[ns]; !ignored {
-			changes = append(changes, rules.NamespaceChange{
-				State:         rules.Deleted,
-				Namespace:     ns,
-				GroupsDeleted: deletedGroups,
-			})
+		if !r.shouldCheckNamespace(ns) {
+			continue
 		}
+
+		changes = append(changes, rules.NamespaceChange{
+			State:         rules.Deleted,
+			Namespace:     ns,
+			GroupsDeleted: deletedGroups,
+		})
 	}
 
 	p := printer.New(r.DisableColor)
