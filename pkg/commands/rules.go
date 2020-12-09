@@ -159,7 +159,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	loadRulesCmd.Arg("rule-files", "The rule files to check.").Required().ExistingFilesVar(&r.RuleFilesList)
 
 	// Diff Command
-	diffRulesCmd.Flag("namespaces", "comma-seperated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
+	diffRulesCmd.Flag("namespaces", "comma-separated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
 	diffRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a diff. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	diffRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
 	diffRulesCmd.Flag(
@@ -169,7 +169,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 	diffRulesCmd.Flag("disable-color", "disable colored output").BoolVar(&r.DisableColor)
 
 	// Sync Command
-	syncRulesCmd.Flag("namespaces", "comma-seperated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
+	syncRulesCmd.Flag("namespaces", "comma-separated list of namespaces to check during a diff. Cannot be used together with --ignored-namespaces.").StringVar(&r.Namespaces)
 	syncRulesCmd.Flag("ignored-namespaces", "comma-separated list of namespaces to ignore during a sync. Cannot be used together with --namespaces.").StringVar(&r.IgnoredNamespaces)
 	syncRulesCmd.Flag("rule-files", "The rule files to check. Flag can be reused to load multiple files.").StringVar(&r.RuleFiles)
 	syncRulesCmd.Flag(
@@ -226,7 +226,7 @@ func (r *RuleCommand) setup(k *kingpin.ParseContext) error {
 
 func (r *RuleCommand) setupFiles() error {
 	if r.Namespaces != "" && r.IgnoredNamespaces != "" {
-		return errors.New("--namespaces and --ignored-namespaces cannot be set at the same time.")
+		return errors.New("--namespaces and --ignored-namespaces cannot be set at the same time")
 	}
 
 	// Set up ignored namespaces map for sync/diff command
