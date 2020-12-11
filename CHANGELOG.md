@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+* [ENHANCEMENT] Handle trailing slashes in URLs in `cortextool`. #XXX
 * [BUGFIX] Fix inaccuracy in `e2ealerting` caused by invalid purging condition on timestamps. #117
 * [FEATURE] Add support for position rule-files arguments to `rules sync` and `rules diff` #125
 * [FEATURE] Add an allow-list of namespaces for `rules sync` and `rules diff` #125
