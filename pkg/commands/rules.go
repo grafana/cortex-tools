@@ -126,6 +126,11 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 			Required().
 			StringVar(&r.ClientConfig.ID)
 
+		c.Flag("use-legacy-routes", "If set, API requests to cortex will use the legacy /api/prom/ routes, alternatively set CORTEX_USE_LEGACY_ROUTES.").
+			Default("false").
+			Envar("CORTEX_USE_LEGACY_ROUTES").
+			BoolVar(&r.ClientConfig.UseLegacyRoutes)
+
 		c.Flag("tls-ca-path", "TLS CA certificate to verify cortex API as part of mTLS, alternatively set CORTEX_TLS_CA_PATH.").
 			Default("").
 			Envar("CORTEX_TLS_CA_CERT").
@@ -418,6 +423,9 @@ func (r *RuleCommand) diffRules(k *kingpin.ParseContext) error {
 	}
 
 	currentNamespaceMap, err := r.cli.ListRules(context.Background(), "")
+	//TODO: Skipping the 404s here might end up in an unsual scenario.
+	// If we're unable to reach the Cortex API due to a bad URL, we'll assume no rules are
+	// part of the namespace and provide a diff of the whole ruleset.
 	if err != nil && err != client.ErrResourceNotFound {
 		return errors.Wrap(err, "diff operation unsuccessful, unable to contact cortex api")
 	}
@@ -478,6 +486,9 @@ func (r *RuleCommand) syncRules(k *kingpin.ParseContext) error {
 	}
 
 	currentNamespaceMap, err := r.cli.ListRules(context.Background(), "")
+	//TODO: Skipping the 404s here might end up in an unsual scenario.
+	// If we're unable to reach the Cortex API due to a bad URL, we'll assume no rules are
+	// part of the namespace and provide a diff of the whole ruleset.
 	if err != nil && err != client.ErrResourceNotFound {
 		return errors.Wrap(err, "sync operation unsuccessful, unable to contact cortex api")
 	}

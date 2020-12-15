@@ -7,11 +7,17 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path"
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/util/tls"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	rulerAPIPath  = "/api/v1/rules"
+	legacyAPIPath = "/api/prom/rules"
 )
 
 var (
@@ -21,10 +27,11 @@ var (
 
 // Config is used to configure a Ruler Client
 type Config struct {
-	Key     string `yaml:"key"`
-	Address string `yaml:"address"`
-	ID      string `yaml:"id"`
-	TLS     tls.ClientConfig
+	Key             string `yaml:"key"`
+	Address         string `yaml:"address"`
+	ID              string `yaml:"id"`
+	TLS             tls.ClientConfig
+	UseLegacyRoutes bool `yaml:"use_legacy_routes"`
 }
 
 // CortexClient is used to get and load rules into a cortex ruler
@@ -33,6 +40,7 @@ type CortexClient struct {
 	id       string
 	endpoint *url.URL
 	client   http.Client
+	apiPath  string
 }
 
 // New returns a new Client
@@ -65,11 +73,17 @@ func New(cfg Config) (*CortexClient, error) {
 		client = http.Client{Transport: transport}
 	}
 
+	path := rulerAPIPath
+	if cfg.UseLegacyRoutes {
+		path = legacyAPIPath
+	}
+
 	return &CortexClient{
 		key:      cfg.Key,
 		id:       cfg.ID,
 		endpoint: endpoint,
 		client:   client,
+		apiPath:  path,
 	}, nil
 }
 
@@ -88,7 +102,7 @@ func (r *CortexClient) Query(ctx context.Context, query string) (*http.Response,
 }
 
 func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Response, error) {
-	req, err := http.NewRequest(method, r.endpoint.String()+path, bytes.NewBuffer(payload))
+	req, err := buildRequest(path, method, r.endpoint, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -153,4 +167,9 @@ func checkResponse(r *http.Response) error {
 	}).Errorln("requests failed")
 
 	return errors.New("failed request to the cortex api")
+}
+
+func buildRequest(p, m string, endpoint *url.URL, payload []byte) (*http.Request, error) {
+	endpoint.Path = path.Join(endpoint.Path, p)
+	return http.NewRequest(m, endpoint.String(), bytes.NewBuffer(payload))
 }
