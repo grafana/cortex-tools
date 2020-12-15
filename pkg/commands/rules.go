@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -37,6 +38,7 @@ var (
 	})
 
 	backends = []string{rules.CortexBackend, rules.LokiBackend} // list of supported backend types
+	formats  = []string{"json", "yaml", "table"}                // list of supported formats for the list command
 )
 
 // RuleCommand configures and executes rule related cortex operations
@@ -72,6 +74,9 @@ type RuleCommand struct {
 
 	// Rules check flags
 	Strict bool
+
+	// List Rules Config
+	Format string
 
 	DisableColor bool
 }
@@ -214,6 +219,9 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 		"Comma separated list of paths to directories containing rules yaml files. Each file in a directory with a .yml or .yaml suffix will be parsed.",
 	).StringVar(&r.RuleFilesPath)
 	checkCmd.Flag("strict", "fails rules checks that do not match best practices exactly").BoolVar(&r.Strict)
+
+	// List Command
+	listCmd.Flag("format", "Backend type to interact with: <json|yaml|table>").Default("table").EnumVar(&r.Format, formats...)
 }
 
 func (r *RuleCommand) setup(k *kingpin.ParseContext) error {
@@ -305,16 +313,44 @@ func (r *RuleCommand) listRules(k *kingpin.ParseContext) error {
 
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.Debug)
+	type namespaceAndRuleGroup struct {
+		Namespace string `json:"namespace" yaml:"namespace"`
+		RuleGroup string `json:"rulegroup" yaml:"rulegroup"`
+	}
+	var items []namespaceAndRuleGroup
 
-	fmt.Fprintln(w, "Namespace\t Rule Group")
 	for ns, rulegroups := range rules {
 		for _, rg := range rulegroups {
-			fmt.Fprintf(w, "%s\t %s\n", ns, rg.Name)
+			items = append(items, namespaceAndRuleGroup{
+				Namespace: ns,
+				RuleGroup: rg.Name,
+			})
 		}
 	}
 
-	w.Flush()
+	switch r.Format {
+	case "json":
+		output, err := json.Marshal(items)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(output))
+	case "yaml":
+		output, err := yamlv3.Marshal(items)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(output))
+	default:
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.Debug)
+
+		fmt.Fprintln(w, "Namespace\t Rule Group")
+		for _, item := range items {
+			fmt.Fprintf(w, "%s\t %s\n", item.Namespace, item.RuleGroup)
+		}
+
+		w.Flush()
+	}
 
 	return nil
 }
