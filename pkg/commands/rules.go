@@ -2,13 +2,11 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -222,6 +220,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 
 	// List Command
 	listCmd.Flag("format", "Backend type to interact with: <json|yaml|table>").Default("table").EnumVar(&r.Format, formats...)
+	listCmd.Flag("disable-color", "disable colored output").BoolVar(&r.DisableColor)
 }
 
 func (r *RuleCommand) setup(k *kingpin.ParseContext) error {
@@ -313,46 +312,8 @@ func (r *RuleCommand) listRules(k *kingpin.ParseContext) error {
 
 	}
 
-	type namespaceAndRuleGroup struct {
-		Namespace string `json:"namespace" yaml:"namespace"`
-		RuleGroup string `json:"rulegroup" yaml:"rulegroup"`
-	}
-	var items []namespaceAndRuleGroup
-
-	for ns, rulegroups := range rules {
-		for _, rg := range rulegroups {
-			items = append(items, namespaceAndRuleGroup{
-				Namespace: ns,
-				RuleGroup: rg.Name,
-			})
-		}
-	}
-
-	switch r.Format {
-	case "json":
-		output, err := json.Marshal(items)
-		if err != nil {
-			return err
-		}
-		fmt.Print(string(output))
-	case "yaml":
-		output, err := yamlv3.Marshal(items)
-		if err != nil {
-			return err
-		}
-		fmt.Print(string(output))
-	default:
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.Debug)
-
-		fmt.Fprintln(w, "Namespace\t Rule Group")
-		for _, item := range items {
-			fmt.Fprintf(w, "%s\t %s\n", item.Namespace, item.RuleGroup)
-		}
-
-		w.Flush()
-	}
-
-	return nil
+	p := printer.New(r.DisableColor)
+	return p.PrintRuleSet(rules, r.Format)
 }
 
 func (r *RuleCommand) printRules(k *kingpin.ParseContext) error {
