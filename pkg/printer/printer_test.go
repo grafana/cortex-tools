@@ -14,11 +14,11 @@ import (
 
 func TestPrintRuleSet(t *testing.T) {
 	giveRules := map[string][]rwrulefmt.RuleGroup{
-		"test-namespace-1": []rwrulefmt.RuleGroup{
+		"test-namespace-1": {
 			{RuleGroup: rulefmt.RuleGroup{Name: "test-rulegroup-a"}},
 			{RuleGroup: rulefmt.RuleGroup{Name: "test-rulegroup-b"}},
 		},
-		"test-namespace-2": []rwrulefmt.RuleGroup{
+		"test-namespace-2": {
 			{RuleGroup: rulefmt.RuleGroup{Name: "test-rulegroup-c"}},
 			{RuleGroup: rulefmt.RuleGroup{Name: "test-rulegroup-d"}},
 		},
