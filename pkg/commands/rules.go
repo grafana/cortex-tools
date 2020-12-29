@@ -313,7 +313,7 @@ func (r *RuleCommand) listRules(k *kingpin.ParseContext) error {
 	}
 
 	p := printer.New(r.DisableColor)
-	return p.PrintRuleSet(rules, r.Format)
+	return p.PrintRuleSet(rules, r.Format, os.Stdout)
 }
 
 func (r *RuleCommand) printRules(k *kingpin.ParseContext) error {

@@ -3,7 +3,9 @@ package printer
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -180,15 +182,21 @@ func (p *Printer) PrintComparisonResult(results []rules.NamespaceChange, verbose
 	return nil
 }
 
-func (p *Printer) PrintRuleSet(rules map[string][]rwrulefmt.RuleGroup, format string) error {
+func (p *Printer) PrintRuleSet(rules map[string][]rwrulefmt.RuleGroup, format string, writer io.Writer) error {
+	nsKeys := make([]string, 0, len(rules))
+	for k := range rules {
+		nsKeys = append(nsKeys, k)
+	}
+	sort.Strings(nsKeys)
+
 	type namespaceAndRuleGroup struct {
 		Namespace string `json:"namespace" yaml:"namespace"`
 		RuleGroup string `json:"rulegroup" yaml:"rulegroup"`
 	}
 	var items []namespaceAndRuleGroup
 
-	for ns, rulegroups := range rules {
-		for _, rg := range rulegroups {
+	for _, ns := range nsKeys {
+		for _, rg := range rules[ns] {
 			items = append(items, namespaceAndRuleGroup{
 				Namespace: ns,
 				RuleGroup: rg.Name,
@@ -205,10 +213,10 @@ func (p *Printer) PrintRuleSet(rules map[string][]rwrulefmt.RuleGroup, format st
 
 		// go-text-template
 		if !p.disableColor {
-			return quick.Highlight(os.Stdout, string(output), "json", "terminal", "swapoff")
+			return quick.Highlight(writer, string(output), "json", "terminal", "swapoff")
 		}
 
-		fmt.Print(string(output))
+		fmt.Fprint(writer, string(output))
 	case "yaml":
 		output, err := yaml.Marshal(items)
 		if err != nil {
@@ -217,12 +225,12 @@ func (p *Printer) PrintRuleSet(rules map[string][]rwrulefmt.RuleGroup, format st
 
 		// go-text-template
 		if !p.disableColor {
-			return quick.Highlight(os.Stdout, string(output), "yaml", "terminal", "swapoff")
+			return quick.Highlight(writer, string(output), "yaml", "terminal", "swapoff")
 		}
 
-		fmt.Print(string(output))
+		fmt.Fprint(writer, string(output))
 	default:
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.Debug)
+		w := tabwriter.NewWriter(writer, 0, 0, 1, ' ', tabwriter.Debug)
 
 		fmt.Fprintln(w, "Namespace\t Rule Group")
 		for _, item := range items {
