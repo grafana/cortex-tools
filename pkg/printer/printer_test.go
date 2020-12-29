@@ -89,8 +89,9 @@ test-namespace-2 | test-rulegroup-d
 			var b bytes.Buffer
 
 			p := New(tt.giveDisableColor)
-			p.PrintRuleSet(giveRules, tt.giveFormat, &b)
+			err := p.PrintRuleSet(giveRules, tt.giveFormat, &b)
 
+			require.NoError(tst, err)
 			assert.Equal(tst, tt.wantOutput, b.String())
 		})
 	}
