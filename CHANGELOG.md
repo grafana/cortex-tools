@@ -4,6 +4,8 @@ Order should be `CHANGE`, `FEATURE`, `ENHANCEMENT`, and `BUGFIX`
 
 ## Unreleased
 
+* [ENHANCEMENT] Parse multiple YAML rules documents. #127
+
 ## v0.6.1
 
 * [BUGFIX] Fix `cortextool` generating the wrong paths when executing multiple calls to the cortex API. In particular, commands like `load`, `sync` were affected. #133
