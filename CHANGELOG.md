@@ -4,18 +4,6 @@ Order should be `CHANGE`, `FEATURE`, `ENHANCEMENT`, and `BUGFIX`
 
 ## Unreleased
 
-var writeRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: "loadgen",
-	Name:      "write_request_duration_seconds",
-	Buckets:   defBuckets,
-}, []string{"success"})
-
-var queryRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: "loadgen",
-	Name:      "query_request_duration_seconds",
-	Buckets:   defBuckets,
-}, []string{"success"})
-
 * [CHANGE] Loadgen: Add `loadgen` namespace to loadgen metrics. #152
   * `write_request_duration_seconds` --> `loadgen_write_request_duration_seconds`
   * `query_request_duration_seconds` --> `loadgen_query_request_duration_seconds`
