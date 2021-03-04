@@ -77,10 +77,7 @@ func CreateBlocks(input IteratorCreator, mint, maxt int64, maxSamplesInAppender 
 		return err
 	}
 	defer func() {
-		var mErr tsdb_errors.MultiError
-		mErr.Add(returnErr)
-		mErr.Add(db.Close())
-		returnErr = mErr.Err()
+		returnErr = tsdb_errors.NewMulti(returnErr, db.Close()).Err()
 	}()
 
 	var wroteHeader bool
@@ -92,10 +89,7 @@ func CreateBlocks(input IteratorCreator, mint, maxt int64, maxSamplesInAppender 
 				return errors.Wrap(err, "block writer")
 			}
 			defer func() {
-				var mErr tsdb_errors.MultiError
-				mErr.Add(err)
-				mErr.Add(w.Close())
-				err = mErr.Err()
+				err = tsdb_errors.NewMulti(err, w.Close()).Err()
 			}()
 
 			ctx := context.Background()
@@ -161,11 +155,9 @@ func CreateBlocks(input IteratorCreator, mint, maxt int64, maxSamplesInAppender 
 
 			return nil
 		}()
-
 		if err != nil {
 			return errors.Wrap(err, "process blocks")
 		}
 	}
 	return nil
-
 }

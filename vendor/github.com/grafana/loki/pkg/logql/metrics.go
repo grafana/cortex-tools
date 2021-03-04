@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cortexproject/cortex/pkg/util"
+	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/dustin/go-humanize"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -65,7 +65,7 @@ var (
 )
 
 func RecordMetrics(ctx context.Context, p Params, status string, stats stats.Result) {
-	logger := util.WithContext(ctx, util.Logger)
+	logger := util_log.WithContext(ctx, util_log.Logger)
 	queryType, err := QueryType(p.Query())
 	if err != nil {
 		level.Warn(logger).Log("msg", "error parsing query type", "err", err)

@@ -31,8 +31,10 @@ type SampleExtractor interface {
 }
 
 // StreamSampleExtractor extracts sample for a log line.
+// A StreamSampleExtractor never mutate the received line.
 type StreamSampleExtractor interface {
 	Process(line []byte) (float64, LabelsResult, bool)
+	ProcessString(line string) (float64, LabelsResult, bool)
 }
 
 type lineSampleExtractor struct {
@@ -45,11 +47,13 @@ type lineSampleExtractor struct {
 
 // NewLineSampleExtractor creates a SampleExtractor from a LineExtractor.
 // Multiple log stages are run before converting the log line.
-func NewLineSampleExtractor(ex LineExtractor, stages []Stage, groups []string, without bool, noLabels bool) (SampleExtractor, error) {
+func NewLineSampleExtractor(ex LineExtractor, stages []Stage, groups []string, without, noLabels bool) (SampleExtractor, error) {
+	s := ReduceStages(stages)
+	hints := newParserHint(s.RequiredLabelNames(), groups, without, noLabels, "")
 	return &lineSampleExtractor{
-		Stage:            ReduceStages(stages),
+		Stage:            s,
 		LineExtractor:    ex,
-		baseBuilder:      NewBaseLabelsBuilderWithGrouping(groups, without, noLabels),
+		baseBuilder:      NewBaseLabelsBuilderWithGrouping(groups, hints, without, noLabels),
 		streamExtractors: make(map[uint64]StreamSampleExtractor),
 	}, nil
 }
@@ -88,6 +92,11 @@ func (l *streamLineSampleExtractor) Process(line []byte) (float64, LabelsResult,
 	return l.LineExtractor(line), l.builder.GroupedLabels(), true
 }
 
+func (l *streamLineSampleExtractor) ProcessString(line string) (float64, LabelsResult, bool) {
+	// unsafe get bytes since we have the guarantee that the line won't be mutated.
+	return l.Process(unsafeGetBytes(line))
+}
+
 type convertionFn func(value string) (float64, error)
 
 type labelSampleExtractor struct {
@@ -105,7 +114,7 @@ type labelSampleExtractor struct {
 // to remove sample containing the __error__ label.
 func LabelExtractorWithStages(
 	labelName, conversion string,
-	groups []string, without bool, noLabels bool,
+	groups []string, without, noLabels bool,
 	preStages []Stage,
 	postFilter Stage,
 ) (SampleExtractor, error) {
@@ -125,12 +134,14 @@ func LabelExtractorWithStages(
 		groups = append(groups, labelName)
 		sort.Strings(groups)
 	}
+	preStage := ReduceStages(preStages)
+	hints := newParserHint(append(preStage.RequiredLabelNames(), postFilter.RequiredLabelNames()...), groups, without, noLabels, labelName)
 	return &labelSampleExtractor{
-		preStage:         ReduceStages(preStages),
+		preStage:         preStage,
 		conversionFn:     convFn,
 		labelName:        labelName,
 		postFilter:       postFilter,
-		baseBuilder:      NewBaseLabelsBuilderWithGrouping(groups, without, noLabels),
+		baseBuilder:      NewBaseLabelsBuilderWithGrouping(groups, hints, without, noLabels),
 		streamExtractors: make(map[uint64]StreamSampleExtractor),
 	}, nil
 }
@@ -178,6 +189,11 @@ func (l *streamLabelSampleExtractor) Process(line []byte) (float64, LabelsResult
 		return 0, nil, false
 	}
 	return v, l.builder.GroupedLabels(), true
+}
+
+func (l *streamLabelSampleExtractor) ProcessString(line string) (float64, LabelsResult, bool) {
+	// unsafe get bytes since we have the guarantee that the line won't be mutated.
+	return l.Process(unsafeGetBytes(line))
 }
 
 func convertFloat(v string) (float64, error) {

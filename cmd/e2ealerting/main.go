@@ -4,14 +4,14 @@ import (
 	"flag"
 	"os"
 
-	"github.com/go-kit/kit/log/level"
-	"github.com/grafana/cortex-tools/pkg/alerting"
-
-	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/flagext"
+	util_log "github.com/cortexproject/cortex/pkg/util/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/weaveworks/common/logging"
 	"github.com/weaveworks/common/server"
+
+	"github.com/grafana/cortex-tools/pkg/alerting"
 )
 
 func main() {
@@ -26,8 +26,8 @@ func main() {
 	flagext.RegisterFlags(&runnerConfig)
 	flag.Parse()
 
-	util.InitLogger(&serverConfig)
-	logger := util.Logger
+	util_log.InitLogger(&serverConfig)
+	logger := util_log.Logger
 	serverConfig.Log = logging.GoKit(logger)
 
 	server, err := server.New(serverConfig)

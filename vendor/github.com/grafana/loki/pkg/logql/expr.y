@@ -26,6 +26,7 @@ import (
   MetricExpr              SampleExpr
   VectorOp                string
   BinOpExpr               SampleExpr
+  LabelReplaceExpr        SampleExpr
   binOp                   string
   bytes                   uint64
   str                     string
@@ -45,6 +46,9 @@ import (
   LabelFormatExpr         *labelFmtExpr
   LabelFormat             log.LabelFmt
   LabelsFormat            []log.LabelFmt
+  JSONExpressionParser    *jsonExpressionParser
+  JSONExpression          log.JSONExpression
+  JSONExpressionList      []log.JSONExpression
   UnwrapExpr              *unwrapExpr
 }
 
@@ -67,6 +71,7 @@ import (
 %type <VectorOp>              vectorOp
 %type <BinOpExpr>             binOpExpr
 %type <LiteralExpr>           literalExpr
+%type <LabelReplaceExpr>      labelReplaceExpr
 %type <BinOpModifier>         binOpModifier
 %type <LabelParser>           labelParser
 %type <PipelineExpr>          pipelineExpr
@@ -80,8 +85,11 @@ import (
 %type <LabelFormatExpr>       labelFormatExpr
 %type <LabelFormat>           labelFormat
 %type <LabelsFormat>          labelsFormat
+%type <JSONExpressionParser>  jsonExpressionParser
+%type <JSONExpression>        jsonExpression
+%type <JSONExpressionList>    jsonExpressionList
 %type <UnwrapExpr>            unwrapExpr
-%type <UnitFilter>           unitFilter
+%type <UnitFilter>            unitFilter
 
 %token <bytes> BYTES
 %token <str>      IDENTIFIER STRING NUMBER
@@ -90,6 +98,7 @@ import (
                   OPEN_PARENTHESIS CLOSE_PARENTHESIS BY WITHOUT COUNT_OVER_TIME RATE SUM AVG MAX MIN COUNT STDDEV STDVAR BOTTOMK TOPK
                   BYTES_OVER_TIME BYTES_RATE BOOL JSON REGEXP LOGFMT PIPE LINE_FMT LABEL_FMT UNWRAP AVG_OVER_TIME SUM_OVER_TIME MIN_OVER_TIME
                   MAX_OVER_TIME STDVAR_OVER_TIME STDDEV_OVER_TIME QUANTILE_OVER_TIME BYTES_CONV DURATION_CONV DURATION_SECONDS_CONV
+                  ABSENT_OVER_TIME LABEL_REPLACE UNPACK
 
 // Operators are listed with increasing precedence.
 %left <binOp> OR
@@ -113,6 +122,7 @@ metricExpr:
     | vectorAggregationExpr                         { $$ = $1 }
     | binOpExpr                                     { $$ = $1 }
     | literalExpr                                   { $$ = $1 }
+    | labelReplaceExpr                              { $$ = $1 }
     | OPEN_PARENTHESIS metricExpr CLOSE_PARENTHESIS { $$ = $2 }
     ;
 
@@ -166,6 +176,12 @@ vectorAggregationExpr:
     // Aggregations with 2 arguments.
     | vectorOp OPEN_PARENTHESIS NUMBER COMMA metricExpr CLOSE_PARENTHESIS                 { $$ = mustNewVectorAggregationExpr($5, $1, nil, &$3) }
     | vectorOp OPEN_PARENTHESIS NUMBER COMMA metricExpr CLOSE_PARENTHESIS grouping        { $$ = mustNewVectorAggregationExpr($5, $1, $7, &$3) }
+    | vectorOp grouping OPEN_PARENTHESIS NUMBER COMMA metricExpr CLOSE_PARENTHESIS        { $$ = mustNewVectorAggregationExpr($6, $1, $2, &$4) }
+    ;
+
+labelReplaceExpr:
+    LABEL_REPLACE OPEN_PARENTHESIS metricExpr COMMA STRING COMMA STRING COMMA STRING COMMA STRING CLOSE_PARENTHESIS
+      { $$ = mustNewLabelReplaceExpr($3, $5, $7, $9, $11)}
     ;
 
 filter:
@@ -201,6 +217,7 @@ pipelineExpr:
 pipelineStage:
    lineFilters                   { $$ = $1 }
   | PIPE labelParser             { $$ = $2 }
+  | PIPE jsonExpressionParser    { $$ = $2 }
   | PIPE labelFilter             { $$ = &labelFilterExpr{LabelFilterer: $2 }}
   | PIPE lineFormatExpr          { $$ = $2 }
   | PIPE labelFormatExpr         { $$ = $2 }
@@ -214,7 +231,11 @@ labelParser:
     JSON           { $$ = newLabelParserExpr(OpParserTypeJSON, "") }
   | LOGFMT         { $$ = newLabelParserExpr(OpParserTypeLogfmt, "") }
   | REGEXP STRING  { $$ = newLabelParserExpr(OpParserTypeRegexp, $2) }
+  | UNPACK         { $$ = newLabelParserExpr(OpParserTypeUnpack, "") }
   ;
+
+jsonExpressionParser:
+    JSON jsonExpressionList { $$ = newJSONExpressionParser($2) }
 
 lineFormatExpr: LINE_FMT STRING { $$ = newLineFmtExpr($2) };
 
@@ -241,6 +262,14 @@ labelFilter:
     | labelFilter COMMA labelFilter                  { $$ = log.NewAndLabelFilter($1, $3 ) }
     | labelFilter OR labelFilter                     { $$ = log.NewOrLabelFilter($1, $3 ) }
     ;
+
+jsonExpression:
+    IDENTIFIER EQ STRING { $$ = log.NewJSONExpr($1, $3) }
+
+jsonExpressionList:
+    jsonExpression                          { $$ = []log.JSONExpression{$1} }
+  | jsonExpressionList COMMA jsonExpression { $$ = append($1, $3) }
+  ;
 
 unitFilter:
       durationFilter { $$ = $1 }
@@ -331,6 +360,7 @@ rangeOp:
     | STDVAR_OVER_TIME   { $$ = OpRangeTypeStdvar }
     | STDDEV_OVER_TIME   { $$ = OpRangeTypeStddev }
     | QUANTILE_OVER_TIME { $$ = OpRangeTypeQuantile }
+    | ABSENT_OVER_TIME   { $$ = OpRangeTypeAbsent }
     ;
 
 
@@ -342,5 +372,7 @@ labels:
 grouping:
       BY OPEN_PARENTHESIS labels CLOSE_PARENTHESIS        { $$ = &grouping{ without: false , groups: $3 } }
     | WITHOUT OPEN_PARENTHESIS labels CLOSE_PARENTHESIS   { $$ = &grouping{ without: true , groups: $3 } }
+    | BY OPEN_PARENTHESIS CLOSE_PARENTHESIS               { $$ = &grouping{ without: false , groups: nil } }
+    | WITHOUT OPEN_PARENTHESIS CLOSE_PARENTHESIS          { $$ = &grouping{ without: true , groups: nil } }
     ;
 %%
