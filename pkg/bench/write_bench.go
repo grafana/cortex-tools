@@ -302,7 +302,6 @@ func (w *WriteBench) Run(ctx context.Context) error {
 			}
 
 			for _, batch := range batches {
-				level.Info(w.logger).Log("msg", "sending timeseries batch", "batch_series", strconv.Itoa(len(batch)))
 				batchChan <- batch
 			}
 		}
@@ -311,6 +310,7 @@ func (w *WriteBench) Run(ctx context.Context) error {
 
 func (w *WriteBench) worker(batchChannel chan []prompb.TimeSeries) {
 	for batch := range batchChannel {
+		level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
 		cli, err := w.getRandomWriteClient()
 		if err != nil {
 			level.Error(w.logger).Log("msg", "unable to get client", "err", err)
