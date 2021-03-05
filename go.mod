@@ -26,6 +26,7 @@ require (
 	github.com/grafana-tools/sdk v0.0.0-20210310213032-c3f3511b3e9b
 	github.com/grafana/loki v1.6.2-0.20210310125813-306cc724380c
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
+	github.com/nouney/randomstring v0.0.0-20180330205616-1374daa59f01
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/alertmanager v0.21.1-0.20210310093010-0f9cab6991e6
