@@ -172,8 +172,11 @@ func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.HeaderID, "write-bench.header-id", "", "Sets the X-Scope-OrgID header on write requests to this value.")
 	f.StringVar(&cfg.BasicAuthUsername, "write-bench.basic-auth-username", "", "Set the basic auth username on remote write requests.")
 	f.StringVar(&cfg.BasicAuthPasword, "write-bench.basic-auth-password", "", "Set the basic auth password on remote write requests.")
+
 	f.DurationVar(&cfg.SendInterval, "write-bench.send-interval", time.Second*15, "Interval between sending each batch of series.")
 	f.DurationVar(&cfg.WriteTimeout, "write-bench.write-timeout", time.Second*30, "Write timeout for sending remote write series.")
+	f.IntVar(&cfg.BatchSize, "write-bench.batch-size", 500, "Number of samples to send per remote-write request")
+
 	f.StringVar(&cfg.WorkloadFilePath, "write-bench.workload-file-path", "./workload.yaml", "path to the file containing the workload description")
 }
 
