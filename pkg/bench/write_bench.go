@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -200,19 +201,17 @@ func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Regis
 
 	content, err := ioutil.ReadFile(cfg.WorkloadFilePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unable to read workload YAML file from the disk")
 	}
 
 	workloadDesc := WorkloadDesc{}
 	err = yaml.Unmarshal(content, &workloadDesc)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unable to unmarshal workload YAML file")
 	}
 
+	level.Info(logger).Log("msg", "building workload")
 	workload := newWorkload(workloadDesc)
-	if err != nil {
-		return nil, err
-	}
 
 	writeBench := &WriteBench{
 		cfg: cfg,
@@ -276,6 +275,7 @@ func (w *WriteBench) Run(ctx context.Context) error {
 
 	batchChan := make(chan []prompb.TimeSeries, 10)
 	for i := 0; i < 10; i++ {
+		level.Info(w.logger).Log("msg", "starting worker", "worker_num", strconv.Itoa(i))
 		go w.worker(batchChan)
 	}
 
@@ -283,17 +283,20 @@ func (w *WriteBench) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			close(batchChan)
 			return nil
 		case <-ticker.C:
 			timeseries := w.workload.generateTimeSeries(w.cfg.ID)
 			batchSize := w.cfg.BatchSize
 			batches := make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
 
+			level.Info(w.logger).Log("msg", "sending timeseries", "num_series", strconv.Itoa(len(timeseries)))
 			for batchSize < len(timeseries) {
 				timeseries, batches = timeseries[batchSize:], append(batches, timeseries[0:batchSize:batchSize])
 			}
 
 			for _, batch := range batches {
+				level.Info(w.logger).Log("msg", "sending timeseries batch", "batch_series", strconv.Itoa(len(batch)))
 				batchChan <- batch
 			}
 		}
