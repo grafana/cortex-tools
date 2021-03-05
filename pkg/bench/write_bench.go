@@ -288,11 +288,16 @@ func (w *WriteBench) Run(ctx context.Context) error {
 		case <-ticker.C:
 			timeseries := w.workload.generateTimeSeries(w.cfg.ID)
 			batchSize := w.cfg.BatchSize
-			batches := make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
+			var batches [][]prompb.TimeSeries
+			if batchSize < len(timeseries) {
+				batches = make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
 
-			level.Info(w.logger).Log("msg", "sending timeseries", "num_series", strconv.Itoa(len(timeseries)))
-			for batchSize < len(timeseries) {
-				timeseries, batches = timeseries[batchSize:], append(batches, timeseries[0:batchSize:batchSize])
+				level.Info(w.logger).Log("msg", "sending timeseries", "num_series", strconv.Itoa(len(timeseries)))
+				for batchSize < len(timeseries) {
+					timeseries, batches = timeseries[batchSize:], append(batches, timeseries[0:batchSize:batchSize])
+				}
+			} else {
+				batches = [][]prompb.TimeSeries{timeseries}
 			}
 
 			for _, batch := range batches {
