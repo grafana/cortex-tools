@@ -222,7 +222,8 @@ func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Regis
 			extprom.WrapRegistererWithPrefix("benchtool_", reg),
 			dns.GolangResolverType,
 		),
-		logger: logger,
+		clientPool: map[string]remote.WriteClient{},
+		logger:     logger,
 	}
 
 	// Resolve an initial set of distributor addresses
