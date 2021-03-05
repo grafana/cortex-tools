@@ -280,24 +280,24 @@ func (w *WriteBench) Run(ctx context.Context) error {
 	}
 
 	ticker := time.NewTicker(w.cfg.SendInterval)
-	select {
-	case <-ctx.Done():
-		break
-	case <-ticker.C:
-		timeseries := w.workload.generateTimeSeries(w.cfg.ID)
-		batchSize := w.cfg.BatchSize
-		batches := make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			timeseries := w.workload.generateTimeSeries(w.cfg.ID)
+			batchSize := w.cfg.BatchSize
+			batches := make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
 
-		for batchSize < len(timeseries) {
-			timeseries, batches = timeseries[batchSize:], append(batches, timeseries[0:batchSize:batchSize])
-		}
+			for batchSize < len(timeseries) {
+				timeseries, batches = timeseries[batchSize:], append(batches, timeseries[0:batchSize:batchSize])
+			}
 
-		for _, batch := range batches {
-			batchChan <- batch
+			for _, batch := range batches {
+				batchChan <- batch
+			}
 		}
 	}
-
-	return nil
 }
 
 func (w *WriteBench) worker(batchChannel chan []prompb.TimeSeries) {
