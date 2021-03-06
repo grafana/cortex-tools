@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net/url"
 	"os"
@@ -199,7 +198,7 @@ type WriteBench struct {
 func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Registerer) (*WriteBench, error) {
 	// Load workload file
 
-	content, err := ioutil.ReadFile(cfg.WorkloadFilePath)
+	content, err := os.ReadFile(cfg.WorkloadFilePath)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to read workload YAML file from the disk")
 	}
