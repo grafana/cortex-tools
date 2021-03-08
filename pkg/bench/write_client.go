@@ -14,7 +14,6 @@ import (
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/prometheus/storage/remote"
@@ -35,7 +34,7 @@ type writeClient struct {
 }
 
 // newWriteClient creates a new client for remote write.
-func newWriteClient(name string, conf *remote.ClientConfig, reg prometheus.Registerer) (*writeClient, error) {
+func newWriteClient(name string, conf *remote.ClientConfig, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
 	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "remote_storage_write_client", false, false)
 	if err != nil {
 		return nil, err
@@ -52,19 +51,8 @@ func newWriteClient(name string, conf *remote.ClientConfig, reg prometheus.Regis
 		Client:     httpClient,
 		timeout:    time.Duration(conf.Timeout),
 
-		requestDuration: promauto.With(reg).NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "benchtool",
-				Name:      "write_request_duration_seconds",
-				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
-			},
-			[]string{"code"},
-		),
+		requestDuration: requestHistogram,
 	}, nil
-}
-
-type RecoverableError struct {
-	error
 }
 
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshalled
@@ -93,7 +81,7 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 	if err != nil {
 		// Errors from Client.Do are from (for example) network errors, so are
 		// recoverable.
-		return RecoverableError{err}
+		return err
 	}
 	c.requestDuration.WithLabelValues(httpResp.Status).Observe(time.Since(start).Seconds())
 
@@ -111,7 +99,7 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 		err = errors.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
 	}
 	if httpResp.StatusCode/100 == 5 {
-		return RecoverableError{err}
+		return err
 	}
 	return err
 }

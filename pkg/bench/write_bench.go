@@ -17,6 +17,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
@@ -227,6 +228,14 @@ func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Regis
 		clientPool: map[string]*writeClient{},
 		logger:     logger,
 		reg:        reg,
+		requestDuration: promauto.With(reg).NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "benchtool",
+				Name:      "write_request_duration_seconds",
+				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
+			},
+			[]string{"code"},
+		),
 	}
 
 	// Resolve an initial set of distributor addresses
@@ -263,7 +272,7 @@ func (w *WriteBench) getRandomWriteClient() (*writeClient, error) {
 					Password: config.Secret(w.cfg.BasicAuthPasword),
 				},
 			},
-		}, w.reg)
+		}, w.requestDuration)
 		if err != nil {
 			return nil, err
 		}
@@ -313,29 +322,38 @@ func (w *WriteBench) Run(ctx context.Context) error {
 
 func (w *WriteBench) worker(batchChannel chan []prompb.TimeSeries) {
 	for batch := range batchChannel {
-		level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
-		cli, err := w.getRandomWriteClient()
+		err := w.sendBatch(batch)
 		if err != nil {
-			level.Error(w.logger).Log("msg", "unable to get client", "err", err)
-			continue
-		}
-		req := prompb.WriteRequest{
-			Timeseries: batch,
-		}
-
-		data, err := proto.Marshal(&req)
-		if err != nil {
-			level.Error(w.logger).Log("msg", "unable to marshal write request", "err", err)
-			continue
-		}
-
-		compressed := snappy.Encode(nil, data)
-
-		if err := cli.Store(context.Background(), compressed); err != nil {
-			level.Error(w.logger).Log("msg", "unable to write request", "err", err)
-			continue
+			level.Error(w.logger).Log("msg", "failed to send batch", "err", err)
 		}
 	}
+}
+
+func (w *WriteBench) sendBatch(batch []prompb.TimeSeries) error {
+
+	level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
+	cli, err := w.getRandomWriteClient()
+	if err != nil {
+		return errors.Wrap(err, "unable to get remote-write client")
+	}
+	req := prompb.WriteRequest{
+		Timeseries: batch,
+	}
+
+	data, err := proto.Marshal(&req)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal remote-write request")
+	}
+
+	compressed := snappy.Encode(nil, data)
+
+	err = cli.Store(context.Background(), compressed)
+
+	if err != nil {
+		return errors.Wrap(err, "remote-write request failed")
+	}
+
+	return nil
 }
 
 func (w *WriteBench) resolveAddrsLoop(ctx context.Context) {
