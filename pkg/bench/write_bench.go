@@ -186,13 +186,16 @@ type WriteBench struct {
 	// Do DNS client side load balancing if configured
 	remoteMtx  sync.Mutex
 	addresses  []string
-	clientPool map[string]remote.WriteClient
+	clientPool map[string]*writeClient
 
 	dnsProvider *dns.Provider
 
 	workload *workload
 
+	reg    prometheus.Registerer
 	logger log.Logger
+
+	requestDuration *prometheus.HistogramVec
 }
 
 func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Registerer) (*WriteBench, error) {
@@ -221,8 +224,9 @@ func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Regis
 			extprom.WrapRegistererWithPrefix("benchtool_", reg),
 			dns.GolangResolverType,
 		),
-		clientPool: map[string]remote.WriteClient{},
+		clientPool: map[string]*writeClient{},
 		logger:     logger,
+		reg:        reg,
 	}
 
 	// Resolve an initial set of distributor addresses
@@ -234,14 +238,14 @@ func NewWriteBench(cfg WriteBenchConfig, logger log.Logger, reg prometheus.Regis
 	return writeBench, nil
 }
 
-func (w *WriteBench) getRandomWriteClient() (remote.WriteClient, error) {
+func (w *WriteBench) getRandomWriteClient() (*writeClient, error) {
 	w.remoteMtx.Lock()
 	defer w.remoteMtx.Unlock()
 
 	randomIndex := rand.Intn(len(w.addresses))
 	pick := w.addresses[randomIndex]
 
-	var cli remote.WriteClient
+	var cli *writeClient
 	var exists bool
 
 	if cli, exists = w.clientPool[pick]; !exists {
@@ -249,7 +253,7 @@ func (w *WriteBench) getRandomWriteClient() (remote.WriteClient, error) {
 		if err != nil {
 			return nil, err
 		}
-		cli, err = remote.NewWriteClient("bench-"+pick, &remote.ClientConfig{
+		cli, err = newWriteClient("bench-"+pick, &remote.ClientConfig{
 			URL:     &config.URL{URL: u},
 			Timeout: model.Duration(w.cfg.WriteTimeout),
 
@@ -259,7 +263,7 @@ func (w *WriteBench) getRandomWriteClient() (remote.WriteClient, error) {
 					Password: config.Secret(w.cfg.BasicAuthPasword),
 				},
 			},
-		})
+		}, w.reg)
 		if err != nil {
 			return nil, err
 		}
