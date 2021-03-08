@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -42,13 +43,21 @@ type timeseries struct {
 }
 
 type workload struct {
-	replicas    int
-	series      []*timeseries
-	totalSeries int
+	replicas           int
+	series             []*timeseries
+	totalSeries        int
+	totalSeriesTypeMap map[SeriesType]int
 }
 
-func newWorkload(workloadDesc WorkloadDesc) *workload {
+func newWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *workload {
 	totalSeries := 0
+	totalSeriesTypeMap := map[SeriesType]int{
+		GaugeZero:     0,
+		GaugeRandom:   0,
+		CounterOne:    0,
+		CounterRandom: 0,
+	}
+
 	series := []*timeseries{}
 
 	for _, seriesDesc := range workloadDesc.Series {
@@ -73,7 +82,9 @@ func newWorkload(workloadDesc WorkloadDesc) *workload {
 			labelSets:  labelSets,
 			seriesType: seriesDesc.Type,
 		})
-		totalSeries += len(labelSets)
+		numSeries := len(labelSets)
+		totalSeries += numSeries
+		totalSeriesTypeMap[seriesDesc.Type] += numSeries
 	}
 
 	return &workload{
