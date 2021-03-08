@@ -207,7 +207,7 @@ func TestLintExpressions(t *testing.T) {
 		{
 			name:     "logql simple",
 			expr:     `count_over_time({ foo != "bar" }[12m]) > 1`,
-			expected: `count_over_time({foo!="bar"}[12m]) > 1`,
+			expected: `(count_over_time({foo!="bar"}[12m]) > 1)`,
 			count:    1, modified: 1,
 			logql: true,
 		},
@@ -236,18 +236,19 @@ func TestLintExpressions(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
-			r := RuleNamespace{Groups: []rwrulefmt.RuleGroup{
-				{
-					RuleGroup: rulefmt.RuleGroup{
-						Rules: []rulefmt.RuleNode{
-							{
-								Alert: yaml.Node{Value: "AName"},
-								Expr:  yaml.Node{Value: tc.expr},
+			r := RuleNamespace{
+				Groups: []rwrulefmt.RuleGroup{
+					{
+						RuleGroup: rulefmt.RuleGroup{
+							Rules: []rulefmt.RuleNode{
+								{
+									Alert: yaml.Node{Value: "AName"},
+									Expr:  yaml.Node{Value: tc.expr},
+								},
 							},
 						},
 					},
 				},
-			},
 			}
 
 			backend := CortexBackend
@@ -316,7 +317,8 @@ func TestCheckRecordingRules(t *testing.T) {
 							Rules: []rulefmt.RuleNode{
 								{
 									Record: yaml.Node{Value: tc.ruleName},
-									Expr:   yaml.Node{Value: "rate(some_metric_total)[5m]"}},
+									Expr:   yaml.Node{Value: "rate(some_metric_total)[5m]"},
+								},
 							},
 						},
 					},
