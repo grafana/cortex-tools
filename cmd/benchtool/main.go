@@ -7,26 +7,31 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/flagext"
-	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/weaveworks/common/logging"
 
 	"github.com/grafana/cortex-tools/pkg/bench"
 )
 
 var (
 	writeBenchConfig bench.WriteBenchConfig
+	LogLevelConfig   logging.Level
+	LogFormatConfig  logging.Format
 )
 
 func main() {
-	flagext.RegisterFlags(&writeBenchConfig)
+	flagext.RegisterFlags(&writeBenchConfig, &LogLevelConfig, &LogFormatConfig)
 	flag.Parse()
 
-	var logger log.Logger
-	logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-	logger = log.With(logger, "ts", log.DefaultTimestampUTC, "caller", log.DefaultCaller)
+	logger, err := util.NewPrometheusLogger(LogLevelConfig, LogFormatConfig)
+	if err != nil {
+		level.Error(logger).Log("msg", "error initializing logger", "err", err)
+		os.Exit(1)
+	}
 
 	writeBenchmarker, err := bench.NewWriteBench(writeBenchConfig, logger, prometheus.DefaultRegisterer)
 	if err != nil {
