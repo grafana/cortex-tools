@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
@@ -83,7 +84,7 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 		// recoverable.
 		return err
 	}
-	c.requestDuration.WithLabelValues(httpResp.Status).Observe(time.Since(start).Seconds())
+	c.requestDuration.WithLabelValues(strconv.Itoa(httpResp.StatusCode)).Observe(time.Since(start).Seconds())
 
 	defer func() {
 		io.Copy(ioutil.Discard, httpResp.Body)
