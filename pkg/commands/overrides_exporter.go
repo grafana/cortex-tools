@@ -27,6 +27,8 @@ type OverridesExporterCommand struct {
 	presetsFilePath   string
 	refreshInterval   time.Duration
 
+	lastLimits map[string]*validation.Limits
+
 	registry      *prometheus.Registry
 	overrideGauge *prometheus.GaugeVec
 }
@@ -39,6 +41,7 @@ func NewOverridesExporterCommand() *OverridesExporterCommand {
 			Name: "cortex_overrides",
 			Help: "Various different limits.",
 		}, []string{"limit_type", "type", "user"}),
+		lastLimits: map[string]*validation.Limits{},
 	}
 }
 
@@ -122,6 +125,41 @@ func (o *OverridesExporterCommand) updateMetrics(typ string, limitsMap map[strin
 			"ingestion_burst_size", typ, user,
 		).Set(float64(limits.IngestionBurstSize))
 	}
+
+	// Remove overrides that existed in the last scrape but not in this scrape.
+	// This is not safe if the function is run concurrently, but should be ok in practice.
+	for user := range o.lastLimits {
+		if _, ok := limitsMap[user]; ok {
+			continue
+		}
+
+		o.overrideGauge.DeleteLabelValues(
+			"max_series_per_query", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"max_samples_per_query", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"max_local_series_per_user", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"max_local_series_per_metric", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"max_global_series_per_user", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"max_global_series_per_metric", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"ingestion_rate", typ, user,
+		)
+		o.overrideGauge.DeleteLabelValues(
+			"ingestion_burst_size", typ, user,
+		)
+	}
+
+	o.lastLimits = limitsMap
 }
 
 func (o *OverridesExporterCommand) run(k *kingpin.ParseContext) error {
