@@ -68,7 +68,7 @@ type BucketReader interface {
 	// Iter calls f for each entry in the given directory (not recursive.). The argument to f is the full
 	// object name including the prefix of the inspected directory.
 	// Entries are passed to function in sorted order.
-	Iter(ctx context.Context, dir string, f func(string) error) error
+	Iter(ctx context.Context, dir string, f func(string) error, options ...IterOption) error
 
 	// Get returns a reader for the given object name.
 	Get(ctx context.Context, name string) (io.ReadCloser, error)
@@ -95,6 +95,28 @@ type InstrumentedBucketReader interface {
 	ReaderWithExpectedErrs(IsOpFailureExpectedFunc) BucketReader
 }
 
+// IterOption configures the provided params.
+type IterOption func(params *IterParams)
+
+// WithRecursiveIter is an option that can be applied to Iter() to recursively list objects
+// in the bucket.
+func WithRecursiveIter(params *IterParams) {
+	params.Recursive = true
+}
+
+// IterParams holds the Iter() parameters and is used by objstore clients implementations.
+type IterParams struct {
+	Recursive bool
+}
+
+func ApplyIterOptions(options ...IterOption) IterParams {
+	out := IterParams{}
+	for _, opt := range options {
+		opt(&out)
+	}
+	return out
+}
+
 type ObjectAttributes struct {
 	// Size is the object size in bytes.
 	Size int64 `json:"size"`
@@ -118,7 +140,7 @@ func TryToGetSize(r io.Reader) (int64, error) {
 	case *strings.Reader:
 		return f.Size(), nil
 	}
-	return 0, errors.New("unsupported type of io.Reader")
+	return 0, errors.Errorf("unsupported type of io.Reader: %T", r)
 }
 
 // UploadDir uploads all files in srcdir to the bucket with into a top-level directory
@@ -308,11 +330,11 @@ func (b *metricBucket) ReaderWithExpectedErrs(fn IsOpFailureExpectedFunc) Bucket
 	return b.WithExpectedErrs(fn)
 }
 
-func (b *metricBucket) Iter(ctx context.Context, dir string, f func(name string) error) error {
+func (b *metricBucket) Iter(ctx context.Context, dir string, f func(name string) error, options ...IterOption) error {
 	const op = OpIter
 	b.ops.WithLabelValues(op).Inc()
 
-	err := b.bkt.Iter(ctx, dir, f)
+	err := b.bkt.Iter(ctx, dir, f, options...)
 	if err != nil {
 		if !b.isOpFailureExpected(err) && ctx.Err() != context.Canceled {
 			b.opsFailures.WithLabelValues(op).Inc()

@@ -19,11 +19,12 @@ import (
 	"github.com/gorilla/mux"
 	amconfig "github.com/prometheus/alertmanager/config"
 	amtemplate "github.com/prometheus/alertmanager/template"
-	"github.com/weaveworks/common/user"
 
 	"github.com/cortexproject/cortex/pkg/configs/db"
 	"github.com/cortexproject/cortex/pkg/configs/userconfig"
+	"github.com/cortexproject/cortex/pkg/tenant"
 	"github.com/cortexproject/cortex/pkg/util"
+	util_log "github.com/cortexproject/cortex/pkg/util/log"
 )
 
 var (
@@ -108,12 +109,12 @@ func (a *API) RegisterRoutes(r *mux.Router) {
 
 // getConfig returns the request configuration.
 func (a *API) getConfig(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := user.ExtractOrgIDFromHTTPRequest(r)
+	userID, _, err := tenant.ExtractTenantIDFromHTTPRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 
 	cfg, err := a.db.GetConfig(r.Context(), userID)
 	if err == sql.ErrNoRows {
@@ -146,12 +147,12 @@ func (a *API) getConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) setConfig(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := user.ExtractOrgIDFromHTTPRequest(r)
+	userID, _, err := tenant.ExtractTenantIDFromHTTPRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 
 	var cfg userconfig.Config
 	switch parseConfigFormat(r.Header.Get("Content-Type"), FormatJSON) {
@@ -201,7 +202,7 @@ func (a *API) setConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) validateAlertmanagerConfig(w http.ResponseWriter, r *http.Request) {
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 	cfg, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		level.Error(logger).Log("msg", "error reading request body", "err", err)
@@ -265,7 +266,7 @@ type ConfigsView struct {
 func (a *API) getConfigs(w http.ResponseWriter, r *http.Request) {
 	var cfgs map[string]userconfig.View
 	var cfgErr error
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 	rawSince := r.FormValue("since")
 	if rawSince == "" {
 		cfgs, cfgErr = a.db.GetAllConfigs(r.Context())
@@ -296,12 +297,12 @@ func (a *API) getConfigs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deactivateConfig(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := user.ExtractOrgIDFromHTTPRequest(r)
+	userID, _, err := tenant.ExtractTenantIDFromHTTPRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 
 	if err := a.db.DeactivateConfig(r.Context(), userID); err != nil {
 		if err == sql.ErrNoRows {
@@ -318,12 +319,12 @@ func (a *API) deactivateConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) restoreConfig(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := user.ExtractOrgIDFromHTTPRequest(r)
+	userID, _, err := tenant.ExtractTenantIDFromHTTPRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	logger := util.WithContext(r.Context(), util.Logger)
+	logger := util_log.WithContext(r.Context(), util_log.Logger)
 
 	if err := a.db.RestoreConfig(r.Context(), userID); err != nil {
 		if err == sql.ErrNoRows {

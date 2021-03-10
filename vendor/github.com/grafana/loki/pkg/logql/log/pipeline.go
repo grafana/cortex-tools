@@ -1,6 +1,8 @@
 package log
 
 import (
+	"unsafe"
+
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
@@ -15,13 +17,18 @@ type Pipeline interface {
 }
 
 // StreamPipeline transform and filter log lines and labels.
+// A StreamPipeline never mutate the received line.
 type StreamPipeline interface {
-	Process(line []byte) ([]byte, LabelsResult, bool)
+	Process(line []byte) (resultLine []byte, resultLabels LabelsResult, skip bool)
+	ProcessString(line string) (resultLine string, resultLabels LabelsResult, skip bool)
 }
 
 // Stage is a single step of a Pipeline.
+// A Stage implementation should never mutate the line passed, but instead either
+// return the line unchanged or allocate a new line.
 type Stage interface {
 	Process(line []byte, lbs *LabelsBuilder) ([]byte, bool)
+	RequiredLabelNames() []string
 }
 
 // NewNoopPipeline creates a pipelines that does not process anything and returns log streams as is.
@@ -49,6 +56,10 @@ func (n noopStreamPipeline) Process(line []byte) ([]byte, LabelsResult, bool) {
 	return line, n.LabelsResult, true
 }
 
+func (n noopStreamPipeline) ProcessString(line string) (string, LabelsResult, bool) {
+	return line, n.LabelsResult, true
+}
+
 func (n *noopPipeline) ForStream(labels labels.Labels) StreamPipeline {
 	h := labels.Hash()
 	if cached, ok := n.cache[h]; ok {
@@ -64,11 +75,22 @@ type noopStage struct{}
 func (noopStage) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	return line, true
 }
+func (noopStage) RequiredLabelNames() []string { return []string{} }
 
-type StageFunc func(line []byte, lbs *LabelsBuilder) ([]byte, bool)
+type StageFunc struct {
+	process        func(line []byte, lbs *LabelsBuilder) ([]byte, bool)
+	requiredLabels []string
+}
 
 func (fn StageFunc) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
-	return fn(line, lbs)
+	return fn.process(line, lbs)
+}
+
+func (fn StageFunc) RequiredLabelNames() []string {
+	if fn.requiredLabels == nil {
+		return []string{}
+	}
+	return fn.requiredLabels
 }
 
 // pipeline is a combinations of multiple stages.
@@ -123,19 +145,43 @@ func (p *streamPipeline) Process(line []byte) ([]byte, LabelsResult, bool) {
 	return line, p.builder.LabelsResult(), true
 }
 
+func (p *streamPipeline) ProcessString(line string) (string, LabelsResult, bool) {
+	// Stages only read from the line.
+	lb := unsafeGetBytes(line)
+	lb, lr, ok := p.Process(lb)
+	// either the line is unchanged and we can just send back the same string.
+	// or we created a new buffer for it in which case it is still safe to avoid the string(byte) copy.
+	return unsafeGetString(lb), lr, ok
+}
+
 // ReduceStages reduces multiple stages into one.
 func ReduceStages(stages []Stage) Stage {
 	if len(stages) == 0 {
 		return NoopStage
 	}
-	return StageFunc(func(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
-		var ok bool
-		for _, p := range stages {
-			line, ok = p.Process(line, lbs)
-			if !ok {
-				return nil, false
+	var requiredLabelNames []string
+	for _, s := range stages {
+		requiredLabelNames = append(requiredLabelNames, s.RequiredLabelNames()...)
+	}
+	return StageFunc{
+		process: func(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+			var ok bool
+			for _, p := range stages {
+				line, ok = p.Process(line, lbs)
+				if !ok {
+					return nil, false
+				}
 			}
-		}
-		return line, true
-	})
+			return line, true
+		},
+		requiredLabels: requiredLabelNames,
+	}
+}
+
+func unsafeGetBytes(s string) []byte {
+	return *(*[]byte)(unsafe.Pointer(&s))
+}
+
+func unsafeGetString(buf []byte) string {
+	return *((*string)(unsafe.Pointer(&buf)))
 }

@@ -6,11 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/weaveworks/common/httpgrpc"
 
-	"github.com/cortexproject/cortex/pkg/ingester/client"
+	"github.com/cortexproject/cortex/pkg/cortexpb"
+	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/extract"
 )
 
@@ -33,7 +36,7 @@ const (
 	errInvalidLabel       = "sample invalid label: %.200q metric %.200q"
 	errLabelNameTooLong   = "label name too long: %.200q metric %.200q"
 	errLabelValueTooLong  = "label value too long: %.200q metric %.200q"
-	errTooManyLabels      = "sample for '%s' has %d label names; limit %d"
+	errTooManyLabels      = "series has too many labels (actual: %d, limit: %d) series: '%s'"
 	errTooOld             = "sample for '%s' has timestamp too old: %d"
 	errTooNew             = "sample for '%s' has timestamp too new: %d"
 	errDuplicateLabelName = "duplicate label name: %.200q metric %.200q"
@@ -56,6 +59,9 @@ const (
 	// RateLimited is one of the values for the reason to discard samples.
 	// Declared here to avoid duplication in ingester and distributor.
 	RateLimited = "rate_limited"
+
+	// Too many HA clusters is one of the reasons for discarding samples.
+	TooManyHAClusters = "too_many_ha_clusters"
 )
 
 // DiscardedSamples is a metric of the number of discarded samples, by reason.
@@ -89,7 +95,7 @@ type SampleValidationConfig interface {
 }
 
 // ValidateSample returns an err if the sample is invalid.
-func ValidateSample(cfg SampleValidationConfig, userID string, metricName string, s client.Sample) error {
+func ValidateSample(cfg SampleValidationConfig, userID string, metricName string, s cortexpb.Sample) error {
 	if cfg.RejectOldSamples(userID) && model.Time(s.TimestampMs) < model.Now().Add(-cfg.RejectOldSamplesMaxAge(userID)) {
 		DiscardedSamples.WithLabelValues(greaterThanMaxSampleAge, userID).Inc()
 		return httpgrpc.Errorf(http.StatusBadRequest, errTooOld, metricName, model.Time(s.TimestampMs))
@@ -112,7 +118,7 @@ type LabelValidationConfig interface {
 }
 
 // ValidateLabels returns an err if the labels are invalid.
-func ValidateLabels(cfg LabelValidationConfig, userID string, ls []client.LabelAdapter, skipLabelNameValidation bool) error {
+func ValidateLabels(cfg LabelValidationConfig, userID string, ls []cortexpb.LabelAdapter, skipLabelNameValidation bool) error {
 	if cfg.EnforceMetricName(userID) {
 		metricName, err := extract.MetricNameFromLabelAdapters(ls)
 		if err != nil {
@@ -129,7 +135,7 @@ func ValidateLabels(cfg LabelValidationConfig, userID string, ls []client.LabelA
 	numLabelNames := len(ls)
 	if numLabelNames > cfg.MaxLabelNamesPerSeries(userID) {
 		DiscardedSamples.WithLabelValues(maxLabelNamesPerSeries, userID).Inc()
-		return httpgrpc.Errorf(http.StatusBadRequest, errTooManyLabels, client.FromLabelAdaptersToMetric(ls).String(), numLabelNames, cfg.MaxLabelNamesPerSeries(userID))
+		return httpgrpc.Errorf(http.StatusBadRequest, errTooManyLabels, numLabelNames, cfg.MaxLabelNamesPerSeries(userID), cortexpb.FromLabelAdaptersToMetric(ls).String())
 	}
 
 	maxLabelNameLength := cfg.MaxLabelNameLength(userID)
@@ -178,8 +184,8 @@ type MetadataValidationConfig interface {
 }
 
 // ValidateMetadata returns an err if a metric metadata is invalid.
-func ValidateMetadata(cfg MetadataValidationConfig, userID string, metadata *client.MetricMetadata) error {
-	if cfg.EnforceMetadataMetricName(userID) && metadata.MetricName == "" {
+func ValidateMetadata(cfg MetadataValidationConfig, userID string, metadata *cortexpb.MetricMetadata) error {
+	if cfg.EnforceMetadataMetricName(userID) && metadata.GetMetricFamilyName() == "" {
 		DiscardedMetadata.WithLabelValues(missingMetricName, userID).Inc()
 		return httpgrpc.Errorf(http.StatusBadRequest, errMetadataMissingMetricName)
 	}
@@ -188,10 +194,10 @@ func ValidateMetadata(cfg MetadataValidationConfig, userID string, metadata *cli
 	var reason string
 	var cause string
 	var metadataType string
-	if len(metadata.MetricName) > maxMetadataValueLength {
+	if len(metadata.GetMetricFamilyName()) > maxMetadataValueLength {
 		metadataType = typeMetricName
 		reason = metricNameTooLong
-		cause = metadata.MetricName
+		cause = metadata.GetMetricFamilyName()
 	} else if len(metadata.Help) > maxMetadataValueLength {
 		metadataType = typeHelp
 		reason = helpTooLong
@@ -204,7 +210,7 @@ func ValidateMetadata(cfg MetadataValidationConfig, userID string, metadata *cli
 
 	if reason != "" {
 		DiscardedMetadata.WithLabelValues(reason, userID).Inc()
-		return httpgrpc.Errorf(http.StatusBadRequest, errMetadataTooLong, metadataType, cause, metadata.MetricName)
+		return httpgrpc.Errorf(http.StatusBadRequest, errMetadataTooLong, metadataType, cause, metadata.GetMetricFamilyName())
 	}
 
 	return nil
@@ -213,7 +219,7 @@ func ValidateMetadata(cfg MetadataValidationConfig, userID string, metadata *cli
 // this function formats label adapters as a metric name with labels, while preserving
 // label order, and keeping duplicates. If there are multiple "__name__" labels, only
 // first one is used as metric name, other ones will be included as regular labels.
-func formatLabelSet(ls []client.LabelAdapter) string {
+func formatLabelSet(ls []cortexpb.LabelAdapter) string {
 	metricName, hasMetricName := "", false
 
 	labelStrings := make([]string, 0, len(ls))
@@ -234,4 +240,15 @@ func formatLabelSet(ls []client.LabelAdapter) string {
 	}
 
 	return fmt.Sprintf("%s{%s}", metricName, strings.Join(labelStrings, ", "))
+}
+
+func DeletePerUserValidationMetrics(userID string, log log.Logger) {
+	filter := map[string]string{"user": userID}
+
+	if err := util.DeleteMatchingLabels(DiscardedSamples, filter); err != nil {
+		level.Warn(log).Log("msg", "failed to remove cortex_discarded_samples_total metric for user", "user", userID, "err", err)
+	}
+	if err := util.DeleteMatchingLabels(DiscardedMetadata, filter); err != nil {
+		level.Warn(log).Log("msg", "failed to remove cortex_discarded_metadata_total metric for user", "user", userID, "err", err)
+	}
 }
