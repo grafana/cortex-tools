@@ -104,7 +104,7 @@ func (b *BucketValidationCommand) setObjectNames() {
 func (b *BucketValidationCommand) createTestData(ctx context.Context) error {
 	for dirName, objectName := range b.objectNames {
 		objectPath := dirName + objectName
-		err := b.bucketClient.Upload(ctx, objectPath, bytes.NewReader([]byte(b.objectContent)))
+		err := b.bucketClient.Upload(ctx, objectPath, strings.NewReader([]byte(b.objectContent)))
 		if err != nil {
 			errors.Wrapf(err, "failed to upload object (%s)", objectPath)
 		}
