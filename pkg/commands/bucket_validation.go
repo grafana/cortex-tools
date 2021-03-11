@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/go-kit/kit/log"
@@ -25,7 +25,6 @@ type BucketValidationCommand struct {
 	bucketClient      objstore.Bucket
 	objectNames       map[string]string
 	objectContent     string
-	verbose           bool
 }
 
 // Register is used to register the command to a parent command.
@@ -35,7 +34,6 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 	bvCmd.Command("validate", "Performs block upload/list/delete operations on a bucket to verify that it works correctly.").Action(b.validate)
 	bvCmd.Flag("object-count", "Number of objects to create & delete").Default("2000").IntVar(&b.objectCount)
 	bvCmd.Flag("test-runs", "Number of times we want to run the whole test").Default("1").IntVar(&b.testRuns)
-	bvCmd.Flag("verbose", "Log the bucket client output").BoolVar(&b.verbose)
 	bvCmd.Flag("backend", "Backend type, can currently only be \"s3\"").Default("s3").StringVar(&b.cfg.Backend)
 	bvCmd.Flag("s3.endpoint", "The S3 bucket endpoint. It could be an AWS S3 endpoint listed at https://docs.aws.amazon.com/general/latest/gr/s3.html or the address of an S3-compatible service in hostname:port format.").StringVar(&b.cfg.S3.Endpoint)
 	bvCmd.Flag("s3.bucket-name", "S3 bucket name").StringVar(&b.cfg.S3.BucketName)
@@ -62,12 +60,7 @@ func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	ctx := context.Background()
 
-	bucketClientLogger := log.NewNopLogger()
-	if b.verbose {
-		// Bucket client is quite verbose, only pass it the real logger if --verbose is set.
-		bucketClientLogger = logger
-	}
-	b.bucketClient, err = bucket.NewClient(ctx, b.cfg, "testClient", bucketClientLogger, prometheus.DefaultRegisterer)
+	b.bucketClient, err = bucket.NewClient(ctx, b.cfg, "testClient", logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return errors.Wrap(err, "failed to create the bucket client")
 	}
@@ -104,7 +97,7 @@ func (b *BucketValidationCommand) setObjectNames() {
 func (b *BucketValidationCommand) createTestData(ctx context.Context) error {
 	for dirName, objectName := range b.objectNames {
 		objectPath := dirName + objectName
-		err := b.bucketClient.Upload(ctx, objectPath, strings.NewReader([]byte(b.objectContent)))
+		err := b.bucketClient.Upload(ctx, objectPath, strings.NewReader(b.objectContent))
 		if err != nil {
 			errors.Wrapf(err, "failed to upload object (%s)", objectPath)
 		}
