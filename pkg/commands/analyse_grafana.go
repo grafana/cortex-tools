@@ -65,6 +65,10 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 		}
 
 		metrics, errs := parseMetricsInBoard(board)
+		parseErrs := make([]string, 0, len(errs))
+		for _, err := range errs {
+			parseErrs = append(parseErrs, err.Error())
+		}
 
 		metricsInBoard := make([]string, 0, len(metrics))
 		for metric := range metrics {
@@ -82,7 +86,7 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 			UID:         board.UID,
 			Title:       board.Title,
 			Metrics:     metricsInBoard,
-			ParseErrors: errs,
+			ParseErrors: parseErrs,
 		})
 	}
 
