@@ -23,6 +23,7 @@ type BucketValidationCommand struct {
 	objectCount       int
 	testRuns          int
 	reportEvery       int
+	prefix            string
 	bucketClient      objstore.Bucket
 	objectNames       map[string]string
 	objectContent     string
@@ -37,6 +38,7 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 	bvCmd.Flag("object-count", "Number of objects to create & delete").Default("2000").IntVar(&b.objectCount)
 	bvCmd.Flag("report-every", "Every X operations a progress report gets printed").Default("100").IntVar(&b.reportEvery)
 	bvCmd.Flag("test-runs", "Number of times we want to run the whole test").Default("1").IntVar(&b.testRuns)
+	bvCmd.Flag("prefix", "path prefix to use for test objects in object store").Default("tenant").StringVar(&b.prefix)
 	bvCmd.Flag("backend", "Backend type, can currently only be \"s3\"").Default("s3").StringVar(&b.cfg.Backend)
 	bvCmd.Flag("s3.endpoint", "The S3 bucket endpoint. It could be an AWS S3 endpoint listed at https://docs.aws.amazon.com/general/latest/gr/s3.html or the address of an S3-compatible service in hostname:port format.").StringVar(&b.cfg.S3.Endpoint)
 	bvCmd.Flag("s3.bucket-name", "S3 bucket name").StringVar(&b.cfg.S3.BucketName)
@@ -99,7 +101,7 @@ func (b *BucketValidationCommand) report(phase string, completed int) {
 func (b *BucketValidationCommand) setObjectNames() {
 	b.objectNames = make(map[string]string, b.objectCount)
 	for objectIdx := 0; objectIdx < b.objectCount; objectIdx++ {
-		b.objectNames[fmt.Sprintf("%05X/", objectIdx)] = "testfile"
+		b.objectNames[fmt.Sprintf("%s/%05X/", b.prefix, objectIdx)] = "testfile"
 	}
 }
 
@@ -112,12 +114,12 @@ func (b *BucketValidationCommand) createTestObjects(ctx context.Context) error {
 		objectPath := dirName + objectName
 		err := b.bucketClient.Upload(ctx, objectPath, strings.NewReader(b.objectContent))
 		if err != nil {
-			errors.Wrapf(err, "failed to upload object (%s)", objectPath)
+			return errors.Wrapf(err, "failed to upload object (%s)", objectPath)
 		}
 
 		exists, err := b.bucketClient.Exists(ctx, objectPath)
 		if err != nil {
-			errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
+			return errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
 		}
 		if !exists {
 			return errors.Errorf("Expected obj %s to exist, but it did not", objectPath)
@@ -133,7 +135,7 @@ func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error
 
 	level.Info(b.logger).Log("phase", "listing test objects")
 
-	err := b.bucketClient.Iter(ctx, "", func(dirName string) error {
+	err := b.bucketClient.Iter(ctx, b.prefix, func(dirName string) error {
 		foundDirs[dirName] = struct{}{}
 		return nil
 	})
@@ -187,18 +189,18 @@ func (b *BucketValidationCommand) deleteTestObjects(ctx context.Context) error {
 
 		err = b.bucketClient.Delete(ctx, objectPath)
 		if err != nil {
-			errors.Wrapf(err, "failed to delete obj (%s)", objectPath)
+			return errors.Wrapf(err, "failed to delete obj (%s)", objectPath)
 		}
 		exists, err = b.bucketClient.Exists(ctx, objectPath)
 		if err != nil {
-			errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
+			return errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
 		}
 		if exists {
 			return errors.Errorf("Expected obj %s to not exist, but it did", objectPath)
 		}
 
 		foundDeletedDir := false
-		err = b.bucketClient.Iter(ctx, "", func(dirName string) error {
+		err = b.bucketClient.Iter(ctx, b.prefix, func(dirName string) error {
 			if objectName == dirName {
 				foundDeletedDir = true
 			}
