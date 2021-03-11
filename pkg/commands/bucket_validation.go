@@ -22,9 +22,11 @@ type BucketValidationCommand struct {
 	s3SecretAccessKey string
 	objectCount       int
 	testRuns          int
+	reportEvery       int
 	bucketClient      objstore.Bucket
 	objectNames       map[string]string
 	objectContent     string
+	logger            log.Logger
 }
 
 // Register is used to register the command to a parent command.
@@ -33,6 +35,7 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 
 	bvCmd.Command("validate", "Performs block upload/list/delete operations on a bucket to verify that it works correctly.").Action(b.validate)
 	bvCmd.Flag("object-count", "Number of objects to create & delete").Default("2000").IntVar(&b.objectCount)
+	bvCmd.Flag("report-every", "Every X operations a progress report gets printed").Default("100").IntVar(&b.reportEvery)
 	bvCmd.Flag("test-runs", "Number of times we want to run the whole test").Default("1").IntVar(&b.testRuns)
 	bvCmd.Flag("backend", "Backend type, can currently only be \"s3\"").Default("s3").StringVar(&b.cfg.Backend)
 	bvCmd.Flag("s3.endpoint", "The S3 bucket endpoint. It could be an AWS S3 endpoint listed at https://docs.aws.amazon.com/general/latest/gr/s3.html or the address of an S3-compatible service in hostname:port format.").StringVar(&b.cfg.S3.Endpoint)
@@ -57,34 +60,40 @@ func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
 
 	b.setObjectNames()
 	b.objectContent = "testData"
-	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	b.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	ctx := context.Background()
 
-	b.bucketClient, err = bucket.NewClient(ctx, b.cfg, "testClient", logger, prometheus.DefaultRegisterer)
+	b.bucketClient, err = bucket.NewClient(ctx, b.cfg, "testClient", b.logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return errors.Wrap(err, "failed to create the bucket client")
 	}
 
 	for testRun := 0; testRun < b.testRuns; testRun++ {
-		err = b.createTestData(ctx)
+		err = b.createTestObjects(ctx)
 		if err != nil {
 			return errors.Wrap(err, "error when uploading test data")
 		}
 
-		err = b.validateTestData(ctx)
+		err = b.validateTestObjects(ctx)
 		if err != nil {
 			return errors.Wrap(err, "error when validating test data")
 		}
 
-		err = b.deleteTestData(ctx)
+		err = b.deleteTestObjects(ctx)
 		if err != nil {
 			return errors.Wrap(err, "error when deleting test data")
 		}
 
-		level.Info(logger).Log("testrun_successful", testRun+1)
+		level.Info(b.logger).Log("testrun_successful", testRun+1)
 	}
 
 	return nil
+}
+
+func (b *BucketValidationCommand) report(phase string, completed int) {
+	if completed == 0 || completed%b.reportEvery == 0 {
+		level.Info(b.logger).Log("phase", phase, "completed", completed, "total", b.objectCount)
+	}
 }
 
 func (b *BucketValidationCommand) setObjectNames() {
@@ -94,8 +103,12 @@ func (b *BucketValidationCommand) setObjectNames() {
 	}
 }
 
-func (b *BucketValidationCommand) createTestData(ctx context.Context) error {
+func (b *BucketValidationCommand) createTestObjects(ctx context.Context) error {
+	iteration := 0
 	for dirName, objectName := range b.objectNames {
+		b.report("creating test objects", iteration)
+		iteration++
+
 		objectPath := dirName + objectName
 		err := b.bucketClient.Upload(ctx, objectPath, strings.NewReader(b.objectContent))
 		if err != nil {
@@ -110,12 +123,15 @@ func (b *BucketValidationCommand) createTestData(ctx context.Context) error {
 			return errors.Errorf("Expected obj %s to exist, but it did not", objectPath)
 		}
 	}
+	b.report("creating test objects", iteration)
 
 	return nil
 }
 
-func (b *BucketValidationCommand) validateTestData(ctx context.Context) error {
+func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error {
 	foundDirs := make(map[string]struct{}, b.objectCount)
+
+	level.Info(b.logger).Log("phase", "listing test objects")
 
 	err := b.bucketClient.Iter(ctx, "", func(dirName string) error {
 		foundDirs[dirName] = struct{}{}
@@ -125,7 +141,11 @@ func (b *BucketValidationCommand) validateTestData(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to list objects")
 	}
 
+	iteration := 0
 	for dirName, objectName := range b.objectNames {
+		b.report("validating test objects", iteration)
+		iteration++
+
 		if _, ok := foundDirs[dirName]; !ok {
 			return fmt.Errorf("Expected directory did not exist (%s)", dirName)
 		}
@@ -144,12 +164,17 @@ func (b *BucketValidationCommand) validateTestData(ctx context.Context) error {
 			return errors.Wrapf(err, "got invalid object content (%s)", objectPath)
 		}
 	}
+	b.report("validating test objects", iteration)
 
 	return nil
 }
 
-func (b *BucketValidationCommand) deleteTestData(ctx context.Context) error {
+func (b *BucketValidationCommand) deleteTestObjects(ctx context.Context) error {
+	iteration := 0
 	for dirName, objectName := range b.objectNames {
+		b.report("deleting test objects", iteration)
+		iteration++
+
 		objectPath := dirName + objectName
 
 		exists, err := b.bucketClient.Exists(ctx, objectPath)
@@ -186,6 +211,7 @@ func (b *BucketValidationCommand) deleteTestData(ctx context.Context) error {
 			return errors.Errorf("List returned directory which is supposed to be deleted.")
 		}
 	}
+	b.report("deleting test objects", iteration)
 
 	return nil
 }
