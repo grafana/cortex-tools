@@ -14,26 +14,39 @@ import (
 const unsupportedErr = "unsupported range vector aggregation operation: %s"
 
 func (r rangeAggregationExpr) Extractor() (log.SampleExtractor, error) {
-	return r.extractor(nil, false)
+	return r.extractor(nil)
 }
 
-func (r rangeAggregationExpr) extractor(gr *grouping, all bool) (log.SampleExtractor, error) {
+// extractor creates a SampleExtractor but allows for the grouping to be overridden.
+func (r rangeAggregationExpr) extractor(override *grouping) (log.SampleExtractor, error) {
 	if err := r.validate(); err != nil {
 		return nil, err
 	}
 	var groups []string
 	var without bool
+	var noLabels bool
 
-	// fallback to parents grouping
-	if gr != nil {
-		groups = gr.groups
-		without = gr.without
-	}
-
-	// range aggregation grouping takes priority
 	if r.grouping != nil {
 		groups = r.grouping.groups
 		without = r.grouping.without
+		if len(groups) == 0 {
+			noLabels = true
+		}
+	}
+
+	// uses override if it exists
+	if override != nil {
+		groups = override.groups
+		without = override.without
+		if len(groups) == 0 {
+			noLabels = true
+		}
+	}
+
+	// absent_over_time cannot be grouped (yet?), so set noLabels=true
+	// to make extraction more efficient and less likely to strip per query series limits.
+	if r.operation == OpRangeTypeAbsent {
+		noLabels = true
 	}
 
 	sort.Strings(groups)
@@ -61,16 +74,16 @@ func (r rangeAggregationExpr) extractor(gr *grouping, all bool) (log.SampleExtra
 
 		return log.LabelExtractorWithStages(
 			r.left.unwrap.identifier,
-			convOp, groups, without, all, stages,
+			convOp, groups, without, noLabels, stages,
 			log.ReduceAndLabelFilter(r.left.unwrap.postFilters),
 		)
 	}
 	// otherwise we extract metrics from the log line.
 	switch r.operation {
-	case OpRangeTypeRate, OpRangeTypeCount:
-		return log.NewLineSampleExtractor(log.CountExtractor, stages, groups, without, all)
+	case OpRangeTypeRate, OpRangeTypeCount, OpRangeTypeAbsent:
+		return log.NewLineSampleExtractor(log.CountExtractor, stages, groups, without, noLabels)
 	case OpRangeTypeBytes, OpRangeTypeBytesRate:
-		return log.NewLineSampleExtractor(log.BytesExtractor, stages, groups, without, all)
+		return log.NewLineSampleExtractor(log.BytesExtractor, stages, groups, without, noLabels)
 	default:
 		return nil, fmt.Errorf(unsupportedErr, r.operation)
 	}
@@ -79,7 +92,7 @@ func (r rangeAggregationExpr) extractor(gr *grouping, all bool) (log.SampleExtra
 func (r rangeAggregationExpr) aggregator() (RangeVectorAggregator, error) {
 	switch r.operation {
 	case OpRangeTypeRate:
-		return rateLogs(r.left.interval), nil
+		return rateLogs(r.left.interval, r.left.unwrap != nil), nil
 	case OpRangeTypeCount:
 		return countOverTime, nil
 	case OpRangeTypeBytesRate:
@@ -98,15 +111,24 @@ func (r rangeAggregationExpr) aggregator() (RangeVectorAggregator, error) {
 		return stdvarOverTime, nil
 	case OpRangeTypeQuantile:
 		return quantileOverTime(*r.params), nil
+	case OpRangeTypeAbsent:
+		return one, nil
 	default:
 		return nil, fmt.Errorf(unsupportedErr, r.operation)
 	}
 }
 
 // rateLogs calculates the per-second rate of log lines.
-func rateLogs(selRange time.Duration) func(samples []promql.Point) float64 {
+func rateLogs(selRange time.Duration, computeValues bool) func(samples []promql.Point) float64 {
 	return func(samples []promql.Point) float64 {
-		return float64(len(samples)) / selRange.Seconds()
+		if !computeValues {
+			return float64(len(samples)) / selRange.Seconds()
+		}
+		var total float64
+		for _, p := range samples {
+			total += p.V
+		}
+		return total / selRange.Seconds()
 	}
 }
 
@@ -236,4 +258,8 @@ func quantile(q float64, values vectorByValueHeap) float64 {
 
 	weight := rank - math.Floor(rank)
 	return values[int(lowerIndex)].V*(1-weight) + values[int(upperIndex)].V*weight
+}
+
+func one(samples []promql.Point) float64 {
+	return 1.0
 }

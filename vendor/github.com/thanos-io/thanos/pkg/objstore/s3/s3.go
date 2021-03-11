@@ -32,6 +32,8 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type ctxKey int
+
 const (
 	// DirDelim is the delimiter used to model a directory structure in an object store bucket.
 	DirDelim = "/"
@@ -44,6 +46,13 @@ const (
 
 	// SSES3 is the name of the SSE-S3 method for objstore encryption.
 	SSES3 = "SSE-S3"
+
+	// sseConfigKey is the context key to override SSE config. This feature is used by downstream
+	// projects (eg. Cortex) to inject custom SSE config on a per-request basis. Future work or
+	// refactoring can introduce breaking changes as far as the functionality is preserved.
+	// NOTE: we're using a context value only because it's a very specific S3 option. If SSE will
+	// be available to wider set of backends we should probably add a variadic option to Get() and Upload().
+	sseConfigKey = ctxKey(0)
 )
 
 var DefaultConfig = Config{
@@ -51,6 +60,11 @@ var DefaultConfig = Config{
 	HTTPConfig: HTTPConfig{
 		IdleConnTimeout:       model.Duration(90 * time.Second),
 		ResponseHeaderTimeout: model.Duration(2 * time.Minute),
+		TLSHandshakeTimeout:   model.Duration(10 * time.Second),
+		ExpectContinueTimeout: model.Duration(1 * time.Second),
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   100,
+		MaxConnsPerHost:       0,
 	},
 	// Minimum file size after which an HTTP multipart request should be used to upload objects to storage.
 	// Set to 128 MiB as in the minio client.
@@ -59,16 +73,17 @@ var DefaultConfig = Config{
 
 // Config stores the configuration for s3 bucket.
 type Config struct {
-	Bucket          string            `yaml:"bucket"`
-	Endpoint        string            `yaml:"endpoint"`
-	Region          string            `yaml:"region"`
-	AccessKey       string            `yaml:"access_key"`
-	Insecure        bool              `yaml:"insecure"`
-	SignatureV2     bool              `yaml:"signature_version2"`
-	SecretKey       string            `yaml:"secret_key"`
-	PutUserMetadata map[string]string `yaml:"put_user_metadata"`
-	HTTPConfig      HTTPConfig        `yaml:"http_config"`
-	TraceConfig     TraceConfig       `yaml:"trace"`
+	Bucket             string            `yaml:"bucket"`
+	Endpoint           string            `yaml:"endpoint"`
+	Region             string            `yaml:"region"`
+	AccessKey          string            `yaml:"access_key"`
+	Insecure           bool              `yaml:"insecure"`
+	SignatureV2        bool              `yaml:"signature_version2"`
+	SecretKey          string            `yaml:"secret_key"`
+	PutUserMetadata    map[string]string `yaml:"put_user_metadata"`
+	HTTPConfig         HTTPConfig        `yaml:"http_config"`
+	TraceConfig        TraceConfig       `yaml:"trace"`
+	ListObjectsVersion string            `yaml:"list_objects_version"`
 	// PartSize used for multipart upload. Only used if uploaded object size is known and larger than configured PartSize.
 	PartSize  uint64    `yaml:"part_size"`
 	SSEConfig SSEConfig `yaml:"sse_config"`
@@ -93,6 +108,12 @@ type HTTPConfig struct {
 	ResponseHeaderTimeout model.Duration `yaml:"response_header_timeout"`
 	InsecureSkipVerify    bool           `yaml:"insecure_skip_verify"`
 
+	TLSHandshakeTimeout   model.Duration `yaml:"tls_handshake_timeout"`
+	ExpectContinueTimeout model.Duration `yaml:"expect_continue_timeout"`
+	MaxIdleConns          int            `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost   int            `yaml:"max_idle_conns_per_host"`
+	MaxConnsPerHost       int            `yaml:"max_conns_per_host"`
+
 	// Allow upstream callers to inject a round tripper
 	Transport http.RoundTripper `yaml:"-"`
 }
@@ -110,11 +131,12 @@ func DefaultTransport(config Config) *http.Transport {
 			DualStack: true,
 		}).DialContext,
 
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   100,
+		MaxIdleConns:          config.HTTPConfig.MaxIdleConns,
+		MaxIdleConnsPerHost:   config.HTTPConfig.MaxIdleConnsPerHost,
 		IdleConnTimeout:       time.Duration(config.HTTPConfig.IdleConnTimeout),
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		MaxConnsPerHost:       config.HTTPConfig.MaxConnsPerHost,
+		TLSHandshakeTimeout:   time.Duration(config.HTTPConfig.TLSHandshakeTimeout),
+		ExpectContinueTimeout: time.Duration(config.HTTPConfig.ExpectContinueTimeout),
 		// A custom ResponseHeaderTimeout was introduced
 		// to cover cases where the tcp connection works but
 		// the server never answers. Defaults to 2 minutes.
@@ -134,9 +156,10 @@ type Bucket struct {
 	logger          log.Logger
 	name            string
 	client          *minio.Client
-	sse             encrypt.ServerSide
+	defaultSSE      encrypt.ServerSide
 	putUserMetadata map[string]string
 	partSize        uint64
+	listObjectsV1   bool
 }
 
 // parseConfig unmarshals a buffer into a Config with default HTTPConfig values.
@@ -159,36 +182,54 @@ func NewBucket(logger log.Logger, conf []byte, component string) (*Bucket, error
 	return NewBucketWithConfig(logger, config, component)
 }
 
+type overrideSignerType struct {
+	credentials.Provider
+	signerType credentials.SignatureType
+}
+
+func (s *overrideSignerType) Retrieve() (credentials.Value, error) {
+	v, err := s.Provider.Retrieve()
+	if err != nil {
+		return v, err
+	}
+	if !v.SignerType.IsAnonymous() {
+		v.SignerType = s.signerType
+	}
+	return v, nil
+}
+
 // NewBucketWithConfig returns a new Bucket using the provided s3 config values.
 func NewBucketWithConfig(logger log.Logger, config Config, component string) (*Bucket, error) {
 	var chain []credentials.Provider
+
+	// TODO(bwplotka): Don't do flags as they won't scale, use actual params like v2, v4 instead
+	wrapCredentialsProvider := func(p credentials.Provider) credentials.Provider { return p }
+	if config.SignatureV2 {
+		wrapCredentialsProvider = func(p credentials.Provider) credentials.Provider {
+			return &overrideSignerType{Provider: p, signerType: credentials.SignatureV2}
+		}
+	}
 
 	if err := validate(config); err != nil {
 		return nil, err
 	}
 	if config.AccessKey != "" {
-		signature := credentials.SignatureV4
-		// TODO(bwplotka): Don't do flags, use actual v2, v4 params.
-		if config.SignatureV2 {
-			signature = credentials.SignatureV2
-		}
-
-		chain = []credentials.Provider{&credentials.Static{
+		chain = []credentials.Provider{wrapCredentialsProvider(&credentials.Static{
 			Value: credentials.Value{
 				AccessKeyID:     config.AccessKey,
 				SecretAccessKey: config.SecretKey,
-				SignerType:      signature,
+				SignerType:      credentials.SignatureV4,
 			},
-		}}
+		})}
 	} else {
 		chain = []credentials.Provider{
-			&credentials.EnvAWS{},
-			&credentials.FileAWSCredentials{},
-			&credentials.IAM{
+			wrapCredentialsProvider(&credentials.EnvAWS{}),
+			wrapCredentialsProvider(&credentials.FileAWSCredentials{}),
+			wrapCredentialsProvider(&credentials.IAM{
 				Client: &http.Client{
 					Transport: http.DefaultTransport,
 				},
-			},
+			}),
 		}
 	}
 
@@ -246,13 +287,18 @@ func NewBucketWithConfig(logger log.Logger, config Config, component string) (*B
 		client.TraceOn(logWriter)
 	}
 
+	if config.ListObjectsVersion != "" && config.ListObjectsVersion != "v1" && config.ListObjectsVersion != "v2" {
+		return nil, errors.Errorf("Initialize s3 client list objects version: Unsupported version %q was provided. Supported values are v1, v2", config.ListObjectsVersion)
+	}
+
 	bkt := &Bucket{
 		logger:          logger,
 		name:            config.Bucket,
 		client:          client,
-		sse:             sse,
+		defaultSSE:      sse,
 		putUserMetadata: config.PutUserMetadata,
 		partSize:        config.PartSize,
+		listObjectsV1:   config.ListObjectsVersion == "v1",
 	}
 	return bkt, nil
 }
@@ -299,7 +345,7 @@ func ValidateForTests(conf Config) error {
 
 // Iter calls f for each entry in the given directory. The argument to f is the full
 // object name including the prefix of the inspected directory.
-func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error) error {
+func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error, options ...objstore.IterOption) error {
 	// Ensure the object name actually ends with a dir suffix. Otherwise we'll just iterate the
 	// object itself as one prefix item.
 	if dir != "" {
@@ -308,7 +354,8 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error) err
 
 	opts := minio.ListObjectsOptions{
 		Prefix:    dir,
-		Recursive: false,
+		Recursive: objstore.ApplyIterOptions(options...).Recursive,
+		UseV1:     b.listObjectsV1,
 	}
 
 	for object := range b.client.ListObjects(ctx, b.name, opts) {
@@ -333,7 +380,12 @@ func (b *Bucket) Iter(ctx context.Context, dir string, f func(string) error) err
 }
 
 func (b *Bucket) getRange(ctx context.Context, name string, off, length int64) (io.ReadCloser, error) {
-	opts := &minio.GetObjectOptions{ServerSideEncryption: b.sse}
+	sse, err := b.getServerSideEncryption(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := &minio.GetObjectOptions{ServerSideEncryption: sse}
 	if length != -1 {
 		if err := opts.SetRange(off, off+length-1); err != nil {
 			return nil, err
@@ -385,6 +437,11 @@ func (b *Bucket) Exists(ctx context.Context, name string) (bool, error) {
 
 // Upload the contents of the reader as an object into the bucket.
 func (b *Bucket) Upload(ctx context.Context, name string, r io.Reader) error {
+	sse, err := b.getServerSideEncryption(ctx)
+	if err != nil {
+		return err
+	}
+
 	// TODO(https://github.com/thanos-io/thanos/issues/678): Remove guessing length when minio provider will support multipart upload without this.
 	size, err := objstore.TryToGetSize(r)
 	if err != nil {
@@ -405,7 +462,7 @@ func (b *Bucket) Upload(ctx context.Context, name string, r io.Reader) error {
 		size,
 		minio.PutObjectOptions{
 			PartSize:             partSize,
-			ServerSideEncryption: b.sse,
+			ServerSideEncryption: sse,
 			UserMetadata:         b.putUserMetadata,
 		},
 	); err != nil {
@@ -439,6 +496,18 @@ func (b *Bucket) IsObjNotFoundErr(err error) bool {
 }
 
 func (b *Bucket) Close() error { return nil }
+
+// getServerSideEncryption returns the SSE to use.
+func (b *Bucket) getServerSideEncryption(ctx context.Context) (encrypt.ServerSide, error) {
+	if value := ctx.Value(sseConfigKey); value != nil {
+		if sse, ok := value.(encrypt.ServerSide); ok {
+			return sse, nil
+		}
+		return nil, errors.New("invalid SSE config override provided in the context")
+	}
+
+	return b.defaultSSE, nil
+}
 
 func configFromEnv() Config {
 	c := Config{
@@ -513,4 +582,10 @@ func NewTestBucketFromConfig(t testing.TB, location string, c Config, reuseBucke
 			t.Logf("deleting bucket %s failed: %s", bktToCreate, err)
 		}
 	}, nil
+}
+
+// ContextWithSSEConfig returns a context with a  custom SSE config set. The returned context should be
+// provided to S3 objstore client functions to override the default SSE config.
+func ContextWithSSEConfig(ctx context.Context, value encrypt.ServerSide) context.Context {
+	return context.WithValue(ctx, sseConfigKey, value)
 }

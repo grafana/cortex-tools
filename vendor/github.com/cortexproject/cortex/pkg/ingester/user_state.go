@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -14,10 +15,11 @@ import (
 	tsdb_record "github.com/prometheus/prometheus/tsdb/record"
 	"github.com/segmentio/fasthash/fnv1a"
 	"github.com/weaveworks/common/httpgrpc"
-	"github.com/weaveworks/common/user"
 
+	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/ingester/client"
 	"github.com/cortexproject/cortex/pkg/ingester/index"
+	"github.com/cortexproject/cortex/pkg/tenant"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/extract"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
@@ -31,6 +33,7 @@ type userStates struct {
 	limiter *Limiter
 	cfg     Config
 	metrics *ingesterMetrics
+	logger  log.Logger
 }
 
 type userState struct {
@@ -43,6 +46,7 @@ type userState struct {
 	ingestedAPISamples  *ewmaRate
 	ingestedRuleSamples *ewmaRate
 	activeSeries        *ActiveSeries
+	logger              log.Logger
 
 	seriesInMetric *metricCounter
 
@@ -61,11 +65,12 @@ const (
 	perMetricSeriesLimit = "per_metric_series_limit"
 )
 
-func newUserStates(limiter *Limiter, cfg Config, metrics *ingesterMetrics) *userStates {
+func newUserStates(limiter *Limiter, cfg Config, metrics *ingesterMetrics, logger log.Logger) *userStates {
 	return &userStates{
 		limiter: limiter,
 		cfg:     cfg,
 		metrics: metrics,
+		logger:  logger,
 	}
 }
 
@@ -103,7 +108,7 @@ func (us *userStates) updateRates() {
 // Labels will be copied if they are kept.
 func (us *userStates) updateActiveSeriesForUser(userID string, now time.Time, lbls []labels.Label) {
 	if s, ok := us.get(userID); ok {
-		s.activeSeries.UpdateSeries(lbls, now, func(l labels.Labels) labels.Labels { return client.CopyLabels(l) })
+		s.activeSeries.UpdateSeries(lbls, now, func(l labels.Labels) labels.Labels { return cortexpb.CopyLabels(l) })
 	}
 }
 
@@ -128,6 +133,7 @@ func (us *userStates) getOrCreate(userID string) *userState {
 	state, ok := us.get(userID)
 	if !ok {
 
+		logger := log.With(us.logger, "user", userID)
 		// Speculatively create a userState object and try to store it
 		// in the map.  Another goroutine may have got there before
 		// us, in which case this userState will be discarded
@@ -140,6 +146,7 @@ func (us *userStates) getOrCreate(userID string) *userState {
 			ingestedAPISamples:  newEWMARate(0.2, us.cfg.RateUpdatePeriod),
 			ingestedRuleSamples: newEWMARate(0.2, us.cfg.RateUpdatePeriod),
 			seriesInMetric:      newMetricCounter(us.limiter),
+			logger:              logger,
 
 			memSeries:             us.metrics.memSeries,
 			memSeriesCreatedTotal: us.metrics.memSeriesCreatedTotal.WithLabelValues(userID),
@@ -150,7 +157,7 @@ func (us *userStates) getOrCreate(userID string) *userState {
 			activeSeries:      NewActiveSeries(),
 			activeSeriesGauge: us.metrics.activeSeriesPerUser.WithLabelValues(userID),
 		}
-		state.mapper = newFPMapper(state.fpToSeries)
+		state.mapper = newFPMapper(state.fpToSeries, logger)
 		stored, ok := us.states.LoadOrStore(userID, state)
 		if !ok {
 			us.metrics.memUsers.Inc()
@@ -172,7 +179,7 @@ func (us *userStates) teardown() {
 }
 
 func (us *userStates) getViaContext(ctx context.Context) (*userState, bool, error) {
-	userID, err := user.ExtractOrgID(ctx)
+	userID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("no user id")
 	}
@@ -182,7 +189,7 @@ func (us *userStates) getViaContext(ctx context.Context) (*userState, bool, erro
 
 // NOTE: memory for `labels` is unsafe; anything retained beyond the
 // life of this function must be copied
-func (us *userStates) getOrCreateSeries(ctx context.Context, userID string, labels []client.LabelAdapter, record *WALRecord) (*userState, model.Fingerprint, *memorySeries, error) {
+func (us *userStates) getOrCreateSeries(ctx context.Context, userID string, labels []cortexpb.LabelAdapter, record *WALRecord) (*userState, model.Fingerprint, *memorySeries, error) {
 	state := us.getOrCreate(userID)
 	// WARNING: `err` may have a reference to unsafe memory in `labels`
 	fp, series, err := state.getSeries(labels, record)
@@ -237,7 +244,7 @@ func (u *userState) createSeriesWithFingerprint(fp model.Fingerprint, metric lab
 		// Check if the per-metric limit has been exceeded
 		if err = u.seriesInMetric.canAddSeriesFor(u.userID, metricName); err != nil {
 			// WARNING: returns a reference to `metric`
-			return nil, makeMetricLimitError(perMetricSeriesLimit, client.FromLabelAdaptersToLabels(metric), err)
+			return nil, makeMetricLimitError(perMetricSeriesLimit, cortexpb.FromLabelAdaptersToLabels(metric), err)
 		}
 	}
 

@@ -33,7 +33,22 @@ import (
 )
 
 var (
-	patRulePath = regexp.MustCompile(`^[^*]*(\*[^/]*)?$`)
+	patRulePath         = regexp.MustCompile(`^[^*]*(\*[^/]*)?$`)
+	unchangeableHeaders = map[string]struct{}{
+		// NOTE: authorization is checked specially,
+		// see RemoteWriteConfig.UnmarshalYAML.
+		// "authorization":                  {},
+		"host":                              {},
+		"content-encoding":                  {},
+		"content-type":                      {},
+		"x-prometheus-remote-write-version": {},
+		"user-agent":                        {},
+		"connection":                        {},
+		"keep-alive":                        {},
+		"proxy-authenticate":                {},
+		"proxy-authorization":               {},
+		"www-authenticate":                  {},
+	}
 )
 
 // Load parses the YAML input s into a Config.
@@ -98,8 +113,9 @@ var (
 
 	// DefaultRemoteWriteConfig is the default remote write configuration.
 	DefaultRemoteWriteConfig = RemoteWriteConfig{
-		RemoteTimeout: model.Duration(30 * time.Second),
-		QueueConfig:   DefaultQueueConfig,
+		RemoteTimeout:  model.Duration(30 * time.Second),
+		QueueConfig:    DefaultQueueConfig,
+		MetadataConfig: DefaultMetadataConfig,
 	}
 
 	// DefaultQueueConfig is the default remote queue configuration.
@@ -119,6 +135,12 @@ var (
 		// Backoff times for retrying a batch of samples on recoverable errors.
 		MinBackoff: model.Duration(30 * time.Millisecond),
 		MaxBackoff: model.Duration(100 * time.Millisecond),
+	}
+
+	// DefaultMetadataConfig is the default metadata configuration for a remote write endpoint.
+	DefaultMetadataConfig = MetadataConfig{
+		Send:         true,
+		SendInterval: model.Duration(1 * time.Minute),
 	}
 
 	// DefaultRemoteReadConfig is the default remote read configuration.
@@ -563,6 +585,7 @@ func CheckTargetAddress(address model.LabelValue) error {
 type RemoteWriteConfig struct {
 	URL                 *config.URL       `yaml:"url"`
 	RemoteTimeout       model.Duration    `yaml:"remote_timeout,omitempty"`
+	Headers             map[string]string `yaml:"headers,omitempty"`
 	WriteRelabelConfigs []*relabel.Config `yaml:"write_relabel_configs,omitempty"`
 	Name                string            `yaml:"name,omitempty"`
 
@@ -570,6 +593,7 @@ type RemoteWriteConfig struct {
 	// values arbitrarily into the overflow maps of further-down types.
 	HTTPClientConfig config.HTTPClientConfig `yaml:",inline"`
 	QueueConfig      QueueConfig             `yaml:"queue_config,omitempty"`
+	MetadataConfig   MetadataConfig          `yaml:"metadata_config,omitempty"`
 }
 
 // SetDirectory joins any relative file paths with dir.
@@ -590,6 +614,14 @@ func (c *RemoteWriteConfig) UnmarshalYAML(unmarshal func(interface{}) error) err
 	for _, rlcfg := range c.WriteRelabelConfigs {
 		if rlcfg == nil {
 			return errors.New("empty or null relabeling rule in remote write config")
+		}
+	}
+	for header := range c.Headers {
+		if strings.ToLower(header) == "authorization" {
+			return errors.New("authorization header must be changed via the basic_auth, bearer_token, or bearer_token_file parameter")
+		}
+		if _, ok := unchangeableHeaders[strings.ToLower(header)]; ok {
+			return errors.Errorf("%s is an unchangeable header", header)
 		}
 	}
 
@@ -621,6 +653,15 @@ type QueueConfig struct {
 	// On recoverable errors, backoff exponentially.
 	MinBackoff model.Duration `yaml:"min_backoff,omitempty"`
 	MaxBackoff model.Duration `yaml:"max_backoff,omitempty"`
+}
+
+// MetadataConfig is the configuration for sending metadata to remote
+// storage.
+type MetadataConfig struct {
+	// Send controls whether we send metric metadata to remote storage.
+	Send bool `yaml:"send"`
+	// SendInterval controls how frequently we send metric metadata.
+	SendInterval model.Duration `yaml:"send_interval"`
 }
 
 // RemoteReadConfig is the configuration for reading from remote storage.
