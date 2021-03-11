@@ -425,6 +425,11 @@ github.com/googleapis/gax-go/v2
 github.com/gorilla/mux
 # github.com/gorilla/websocket v1.4.2
 github.com/gorilla/websocket
+# github.com/gosimple/slug v1.1.1
+github.com/gosimple/slug
+# github.com/grafana-tools/sdk v0.0.0-20210310213032-c3f3511b3e9b
+## explicit
+github.com/grafana-tools/sdk
 # github.com/grafana/loki v1.6.2-0.20210310125813-306cc724380c
 ## explicit
 github.com/grafana/loki/pkg/helpers
@@ -481,6 +486,8 @@ github.com/jessevdk/go-flags
 github.com/jmespath/go-jmespath
 # github.com/jonboulle/clockwork v0.2.2
 github.com/jonboulle/clockwork
+# github.com/josharian/intern v1.0.0
+github.com/josharian/intern
 # github.com/jpillora/backoff v1.0.0
 github.com/jpillora/backoff
 # github.com/json-iterator/go v1.1.10
@@ -501,7 +508,7 @@ github.com/lann/ps
 github.com/lib/pq
 github.com/lib/pq/oid
 github.com/lib/pq/scram
-# github.com/mailru/easyjson v0.7.1
+# github.com/mailru/easyjson v0.7.6
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
@@ -677,6 +684,8 @@ github.com/prometheus/prometheus/util/strutil
 github.com/prometheus/prometheus/util/teststorage
 github.com/prometheus/prometheus/util/testutil
 github.com/prometheus/prometheus/web/api/v1
+# github.com/rainycape/unidecode v0.0.0-20150907023854-cb7f23ec59be
+github.com/rainycape/unidecode
 # github.com/rs/cors v1.7.0
 github.com/rs/cors
 # github.com/rs/xid v1.2.1
