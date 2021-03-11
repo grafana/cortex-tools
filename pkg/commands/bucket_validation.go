@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -24,10 +25,56 @@ type BucketValidationCommand struct {
 	testRuns          int
 	reportEvery       int
 	prefix            string
+	retriesOnError    int
 	bucketClient      objstore.Bucket
 	objectNames       map[string]string
 	objectContent     string
 	logger            log.Logger
+}
+
+type retryingBucketClient struct {
+	objstore.Bucket
+	retries int
+}
+
+func (c *retryingBucketClient) withRetries(f func() error) error {
+	var tries int
+	for {
+		err := f()
+		if err == nil {
+			return nil
+		}
+		tries++
+		if tries >= c.retries {
+			return err
+		}
+	}
+}
+
+func (c *retryingBucketClient) Upload(ctx context.Context, name string, r io.Reader) error {
+	return c.withRetries(func() error { return c.Bucket.Upload(ctx, name, r) })
+}
+
+func (c *retryingBucketClient) Exists(ctx context.Context, name string) (bool, error) {
+	var res bool
+	var err error
+	err = c.withRetries(func() error { res, err = c.Bucket.Exists(ctx, name); return err })
+	return res, err
+}
+
+func (c *retryingBucketClient) Iter(ctx context.Context, dir string, f func(string) error, opts ...objstore.IterOption) error {
+	return c.withRetries(func() error { return c.Bucket.Iter(ctx, dir, f, opts...) })
+}
+
+func (c *retryingBucketClient) Get(ctx context.Context, name string) (io.ReadCloser, error) {
+	var res io.ReadCloser
+	var err error
+	err = c.withRetries(func() error { res, err = c.Bucket.Get(ctx, name); return err })
+	return res, err
+}
+
+func (c *retryingBucketClient) Delete(ctx context.Context, name string) error {
+	return c.withRetries(func() error { return c.Bucket.Delete(ctx, name) })
 }
 
 // Register is used to register the command to a parent command.
@@ -39,6 +86,7 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 	bvCmd.Flag("report-every", "Every X operations a progress report gets printed").Default("100").IntVar(&b.reportEvery)
 	bvCmd.Flag("test-runs", "Number of times we want to run the whole test").Default("1").IntVar(&b.testRuns)
 	bvCmd.Flag("prefix", "path prefix to use for test objects in object store").Default("tenant").StringVar(&b.prefix)
+	bvCmd.Flag("retries-on-error", "number of times we want to retry if object store returns error").Default("3").IntVar(&b.retriesOnError)
 	bvCmd.Flag("backend", "Backend type, can currently only be \"s3\"").Default("s3").StringVar(&b.cfg.Backend)
 	bvCmd.Flag("s3.endpoint", "The S3 bucket endpoint. It could be an AWS S3 endpoint listed at https://docs.aws.amazon.com/general/latest/gr/s3.html or the address of an S3-compatible service in hostname:port format.").StringVar(&b.cfg.S3.Endpoint)
 	bvCmd.Flag("s3.bucket-name", "S3 bucket name").StringVar(&b.cfg.S3.BucketName)
@@ -65,9 +113,14 @@ func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
 	b.logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 	ctx := context.Background()
 
-	b.bucketClient, err = bucket.NewClient(ctx, b.cfg, "testClient", b.logger, prometheus.DefaultRegisterer)
+	bucketClient, err := bucket.NewClient(ctx, b.cfg, "testClient", b.logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return errors.Wrap(err, "failed to create the bucket client")
+	}
+
+	b.bucketClient = &retryingBucketClient{
+		Bucket:  bucketClient,
+		retries: b.retriesOnError,
 	}
 
 	for testRun := 0; testRun < b.testRuns; testRun++ {
