@@ -13,6 +13,7 @@ import (
 	"github.com/grafana-tools/sdk"
 	"github.com/grafana/cortex-tools/pkg/analyse"
 	"github.com/prometheus/prometheus/promql/parser"
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -139,9 +140,14 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 		query = strings.ReplaceAll(query, `$__interval`, "5m")
 		query = strings.ReplaceAll(query, `$interval`, "5m")
 		query = strings.ReplaceAll(query, `$resolution`, "5s")
+		query = strings.ReplaceAll(query, "$__rate_interval", "15s")
+		query = strings.ReplaceAll(query, "$__range", "1d")
+		query = strings.ReplaceAll(query, "${__range_s:glob}", "30")
+		query = strings.ReplaceAll(query, "${__range_s}", "30")
 		expr, err := parser.ParseExpr(query)
 		if err != nil {
 			parseErrors = append(parseErrors, err)
+			log.Debugln("msg", "promql parse error", "err", err, "query", query)
 			continue
 		}
 
