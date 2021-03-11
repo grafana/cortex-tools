@@ -97,7 +97,7 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	if ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
+	if err := ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
 		return err
 	}
 
@@ -110,22 +110,23 @@ func parseMetricsInBoard(board sdk.Board) (map[string]struct{}, []error) {
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
-		metricsFromPanel(*panel, metrics, parseErrors)
+		parseErrors = append(parseErrors, metricsFromPanel(*panel, metrics)...)
 	}
 
 	// Iterate through all the rows and collect metrics
 	for _, row := range board.Rows {
 		for _, panel := range row.Panels {
-			metricsFromPanel(panel, metrics, parseErrors)
+			parseErrors = append(parseErrors, metricsFromPanel(panel, metrics)...)
 		}
 	}
 
 	return metrics, parseErrors
 }
 
-func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}, parseErrors []error) {
+func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
+	parseErrors := []error{}
 	if panel.GetTargets() == nil {
-		return
+		return parseErrors
 	}
 
 	for _, target := range *panel.GetTargets() {
@@ -152,4 +153,6 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}, parseErrors 
 			return nil
 		})
 	}
+
+	return parseErrors
 }

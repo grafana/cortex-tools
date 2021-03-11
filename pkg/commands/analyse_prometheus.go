@@ -49,6 +49,9 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 
 		RoundTripper: rt,
 	})
+	if err != nil {
+		return err
+	}
 
 	v1api := v1.NewAPI(promClient)
 	for _, metric := range grafanaMetrics.MetricsUsed {
@@ -76,7 +79,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 	output := analyse.MetricsInPrometheus{}
 	for metric, count := range metrics {
 		output.TotalActiveSeries += count
-		output.MetricCounts = append(output.MetricCounts, analyse.MetricCount{metric, count})
+		output.MetricCounts = append(output.MetricCounts, analyse.MetricCount{Metric: metric, Count: count})
 	}
 	sort.Slice(output.MetricCounts, func(i, j int) bool {
 		return output.MetricCounts[i].Count > output.MetricCounts[j].Count
@@ -87,7 +90,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	if ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
+	if err := ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
 		return err
 	}
 
