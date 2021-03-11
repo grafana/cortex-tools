@@ -97,13 +97,16 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 }
 
 func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
-	b.cfg.S3.SecretAccessKey.Set(b.s3SecretAccessKey)
+	err := b.cfg.S3.SecretAccessKey.Set(b.s3SecretAccessKey)
+	if err != nil {
+		return errors.Wrap(err, "config validation failed, failed to set s3 secret")
+	}
 
 	if b.cfg.Backend != "s3" {
 		return errors.New("backend type must be \"s3\"")
 	}
 
-	err := b.cfg.Validate()
+	err = b.cfg.Validate()
 	if err != nil {
 		return errors.Wrap(err, "config validation failed")
 	}
@@ -234,7 +237,7 @@ func (b *BucketValidationCommand) deleteTestObjects(ctx context.Context) error {
 
 		exists, err := b.bucketClient.Exists(ctx, objectPath)
 		if err != nil {
-			errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
+			return errors.Wrapf(err, "failed to check if obj exists (%s)", objectPath)
 		}
 		if !exists {
 			return errors.Errorf("Expected obj %s to exist, but it did not", objectPath)
