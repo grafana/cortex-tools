@@ -97,7 +97,7 @@ func (b *BucketValidationCommand) Register(app *kingpin.Application) {
 	bvCmd.Flag("prefix", "Path prefix to use for test objects in object store").Default("tenant").StringVar(&b.prefix)
 	bvCmd.Flag("retries-on-error", "Number of times we want to retry if object store returns error").Default("3").IntVar(&b.retriesOnError)
 	bvCmd.Flag("bucket-config", "The CLI args to configure a storage bucket").StringVar(&b.bucketConfig)
-	bvCmd.Flag("bucket-config-help", "Help text explaining how to use the -bucket-config-args parameter").BoolVar(&b.bucketConfigHelp)
+	bvCmd.Flag("bucket-config-help", "Help text explaining how to use the -bucket-config parameter").BoolVar(&b.bucketConfigHelp)
 }
 
 func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
@@ -155,7 +155,7 @@ func (b *BucketValidationCommand) printBucketConfigHelp() {
 	fmt.Fprintf(fs.Output(), `
 The following help text describes the arguments
 which may be specified in the string that gets
-passed to "-bucket-config-args".
+passed to "-bucket-config".
 
 Example:
 cortextool bucket-validation --bucket-config='-backend=s3 -s3.endpoint=localhost:9000 -s3.bucket-name=example-bucket'
