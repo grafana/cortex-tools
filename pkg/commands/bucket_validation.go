@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,19 +20,28 @@ import (
 
 // BucketValidationCommand is the kingpin command for bucket validation.
 type BucketValidationCommand struct {
-	cfg               bucket.Config
-	s3SecretAccessKey string
-	objectCount       int
-	testRuns          int
-	reportEvery       int
-	prefix            string
-	retriesOnError    int
-	bucketClient      objstore.Bucket
-	objectNames       map[string]string
-	objectContent     string
-	logger            log.Logger
+	cfg              bucket.Config
+	objectCount      int
+	testRuns         int
+	reportEvery      int
+	prefix           string
+	retriesOnError   int
+	bucketConfig     string
+	bucketConfigHelp bool
+	bucketClient     objstore.Bucket
+	objectNames      map[string]string
+	objectContent    string
+	logger           log.Logger
 }
 
+// retryingBucketClient wraps around a bucket client and wraps some
+// of its methods in retrying logic which retries if a call has
+// resulted in an error. The wrapped methods are:
+// * Upload
+// * Exists
+// * Iter
+// * Get
+// * Delete
 type retryingBucketClient struct {
 	objstore.Bucket
 	retries int
@@ -79,36 +89,26 @@ func (c *retryingBucketClient) Delete(ctx context.Context, name string) error {
 
 // Register is used to register the command to a parent command.
 func (b *BucketValidationCommand) Register(app *kingpin.Application) {
-	bvCmd := app.Command("bucket-validation", "Validate that object store bucket works correctly.")
+	bvCmd := app.Command("bucket-validation", "Validate that object store bucket works correctly.").Action(b.validate)
 
-	bvCmd.Command("validate", "Performs block upload/list/delete operations on a bucket to verify that it works correctly.").Action(b.validate)
 	bvCmd.Flag("object-count", "Number of objects to create & delete").Default("2000").IntVar(&b.objectCount)
 	bvCmd.Flag("report-every", "Every X operations a progress report gets printed").Default("100").IntVar(&b.reportEvery)
 	bvCmd.Flag("test-runs", "Number of times we want to run the whole test").Default("1").IntVar(&b.testRuns)
-	bvCmd.Flag("prefix", "path prefix to use for test objects in object store").Default("tenant").StringVar(&b.prefix)
-	bvCmd.Flag("retries-on-error", "number of times we want to retry if object store returns error").Default("3").IntVar(&b.retriesOnError)
-	bvCmd.Flag("backend", "Backend type, can currently only be \"s3\"").Default("s3").StringVar(&b.cfg.Backend)
-	bvCmd.Flag("s3.endpoint", "The S3 bucket endpoint. It could be an AWS S3 endpoint listed at https://docs.aws.amazon.com/general/latest/gr/s3.html or the address of an S3-compatible service in hostname:port format.").StringVar(&b.cfg.S3.Endpoint)
-	bvCmd.Flag("s3.bucket-name", "S3 bucket name").StringVar(&b.cfg.S3.BucketName)
-	bvCmd.Flag("s3.access-key-id", "S3 access key ID").StringVar(&b.cfg.S3.AccessKeyID)
-	bvCmd.Flag("s3.secret-access-key", "S3 secret access key").StringVar(&b.s3SecretAccessKey)
-	bvCmd.Flag("s3.insecure", "If enabled, use http:// for the S3 endpoint instead of https://. This could be useful in local dev/test environments while using an S3-compatible backend storage, like Minio.").BoolVar(&b.cfg.S3.Insecure)
-	bvCmd.Flag("s3.signature-version", "The signature version to use for authenticating against S3. Supported values are: v2, v4").Default("v4").StringVar(&b.cfg.S3.SignatureVersion)
+	bvCmd.Flag("prefix", "Path prefix to use for test objects in object store").Default("tenant").StringVar(&b.prefix)
+	bvCmd.Flag("retries-on-error", "Number of times we want to retry if object store returns error").Default("3").IntVar(&b.retriesOnError)
+	bvCmd.Flag("bucket-config", "The CLI args to configure a storage bucket").StringVar(&b.bucketConfig)
+	bvCmd.Flag("bucket-config-help", "Help text explaining how to use the -bucket-config-args parameter").BoolVar(&b.bucketConfigHelp)
 }
 
 func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
-	err := b.cfg.S3.SecretAccessKey.Set(b.s3SecretAccessKey)
-	if err != nil {
-		return errors.Wrap(err, "config validation failed, failed to set s3 secret")
+	if b.bucketConfigHelp {
+		b.printBucketConfigHelp()
+		return nil
 	}
 
-	if b.cfg.Backend != "s3" {
-		return errors.New("backend type must be \"s3\"")
-	}
-
-	err = b.cfg.Validate()
+	err := b.parseBucketConfig()
 	if err != nil {
-		return errors.Wrap(err, "config validation failed")
+		return errors.Wrap(err, "error when parsing bucket config")
 	}
 
 	b.setObjectNames()
@@ -146,6 +146,33 @@ func (b *BucketValidationCommand) validate(k *kingpin.ParseContext) error {
 	}
 
 	return nil
+}
+
+func (b *BucketValidationCommand) printBucketConfigHelp() {
+	fs := flag.NewFlagSet("bucket-config", flag.ContinueOnError)
+	b.cfg.RegisterFlags(fs)
+
+	fmt.Fprintf(fs.Output(), `
+The following help text describes the arguments
+which may be specified in the string that gets
+passed to "-bucket-config-args".
+
+Example:
+cortextool bucket-validation --bucket-config='-backend=s3 -s3.endpoint=localhost:9000 -s3.bucket-name=example-bucket'
+
+`)
+	fs.Usage()
+}
+
+func (b *BucketValidationCommand) parseBucketConfig() error {
+	fs := flag.NewFlagSet("bucket-config", flag.ContinueOnError)
+	b.cfg.RegisterFlags(fs)
+	err := fs.Parse(strings.Split(b.bucketConfig, " "))
+	if err != nil {
+		return err
+	}
+
+	return b.cfg.Validate()
 }
 
 func (b *BucketValidationCommand) report(phase string, completed int) {
@@ -205,7 +232,7 @@ func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error
 		iteration++
 
 		if _, ok := foundDirs[dirName]; !ok {
-			return fmt.Errorf("Expected directory did not exist (%s)", dirName)
+			return fmt.Errorf("expected directory did not exist (%s)", dirName)
 		}
 
 		objectPath := dirName + objectName
