@@ -18,13 +18,13 @@ import (
 )
 
 var (
-	writeBenchConfig bench.WriteBenchConfig
-	LogLevelConfig   logging.Level
-	LogFormatConfig  logging.Format
+	benchConfig     bench.Config
+	LogLevelConfig  logging.Level
+	LogFormatConfig logging.Format
 )
 
 func main() {
-	flagext.RegisterFlags(&writeBenchConfig, &LogLevelConfig, &LogFormatConfig)
+	flagext.RegisterFlags(&benchConfig, &LogLevelConfig, &LogFormatConfig)
 	flag.Parse()
 
 	logger, err := util.NewPrometheusLogger(LogLevelConfig, LogFormatConfig)
@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	writeBenchmarker, err := bench.NewWriteBench(writeBenchConfig, logger, prometheus.DefaultRegisterer)
+	benchmarkRunner, err := bench.NewBenchRunner(benchConfig, logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		level.Error(logger).Log("msg", "error initializing benchmarker", "err", err)
 		os.Exit(1)
@@ -48,7 +48,7 @@ func main() {
 	}()
 
 	level.Info(logger).Log("msg", "starting writer-benchmarker")
-	err = writeBenchmarker.Run(ctx)
+	err = benchmarkRunner.Run(ctx)
 	if err != nil {
 		level.Error(logger).Log("msg", "benchmarker failed", "err", err)
 		os.Exit(1)
