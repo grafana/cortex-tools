@@ -371,6 +371,9 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 		id:           id,
 		instanceName: instanceName,
 		cfg:          cfg,
+
+		logger:   logger,
+		workload: workload,
 	}
 	cfg.MemberlistKV.MetricsRegisterer = prometheus.DefaultRegisterer
 	cfg.MemberlistKV.Codecs = []codec.Codec{
@@ -390,43 +393,48 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 
 func (r *RingChecker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.cfg.CheckInterval)
+	r.check()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			timeseries := r.workload.generateTimeSeries(r.id)
-
-			addrMap := map[string]int{}
-			for _, s := range timeseries {
-				sort.Slice(s.Labels, func(i, j int) bool {
-					return strings.Compare(s.Labels[i].Name, s.Labels[j].Name) < 0
-				})
-
-				token := shardByAllLabels(r.instanceName, s.Labels)
-
-				rs, err := r.Ring.Get(token, ring.Write, []ring.IngesterDesc{})
-
-				if err != nil {
-					level.Warn(r.logger).Log("msg", "unable to get token for metric", "err", err)
-					continue
-				}
-
-				rs.GetAddresses()
-				for _, addr := range rs.GetAddresses() {
-					_, exists := addrMap[addr]
-					if !exists {
-						addrMap[addr] = 0
-					}
-					addrMap[addr] += 1
-				}
-			}
-
-			fmt.Println("ring check:")
-			for addr, tokensTotal := range addrMap {
-				fmt.Printf("  %s,%d\n", addr, tokensTotal)
-			}
+			r.check()
 		}
+	}
+}
+
+func (r *RingChecker) check() {
+	timeseries := r.workload.generateTimeSeries(r.id)
+
+	addrMap := map[string]int{}
+	for _, s := range timeseries {
+		sort.Slice(s.Labels, func(i, j int) bool {
+			return strings.Compare(s.Labels[i].Name, s.Labels[j].Name) < 0
+		})
+
+		token := shardByAllLabels(r.instanceName, s.Labels)
+
+		rs, err := r.Ring.Get(token, ring.Write, []ring.IngesterDesc{})
+
+		if err != nil {
+			level.Warn(r.logger).Log("msg", "unable to get token for metric", "err", err)
+			continue
+		}
+
+		rs.GetAddresses()
+		for _, addr := range rs.GetAddresses() {
+			_, exists := addrMap[addr]
+			if !exists {
+				addrMap[addr] = 0
+			}
+			addrMap[addr] += 1
+		}
+	}
+
+	fmt.Println("ring check:")
+	for addr, tokensTotal := range addrMap {
+		fmt.Printf("  %s,%d\n", addr, tokensTotal)
 	}
 }
 
