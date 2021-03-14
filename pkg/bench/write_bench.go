@@ -49,7 +49,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 		panic(err)
 	}
 	f.StringVar(&cfg.ID, "bench.id", defaultID, "ID of worker. Defaults to hostname")
-	f.StringVar(&cfg.ID, "bench.instance-name", "default", "Instance name writes and queries will be run against.")
+	f.StringVar(&cfg.InstanceName, "bench.instance-name", "default", "Instance name writes and queries will be run against.")
 	f.StringVar(&cfg.WorkloadFilePath, "bench.workload-file-path", "./workload.yaml", "path to the file containing the workload description")
 
 	cfg.Write.RegisterFlags(f)
@@ -275,7 +275,6 @@ func (w *WriteBenchmarkRunner) worker(batchChannel chan []prompb.TimeSeries) {
 }
 
 func (w *WriteBenchmarkRunner) sendBatch(batch []prompb.TimeSeries) error {
-
 	level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
 	cli, err := w.getRandomWriteClient()
 	if err != nil {
