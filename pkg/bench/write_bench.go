@@ -393,7 +393,6 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 
 func (r *RingChecker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.cfg.CheckInterval)
-	r.check()
 	for {
 		select {
 		case <-ctx.Done():
