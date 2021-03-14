@@ -161,6 +161,7 @@ type WriteBenchmarkRunner struct {
 
 func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *workload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
 	writeBench := &WriteBenchmarkRunner{
+		id:  id,
 		cfg: cfg,
 
 		workload: workload,
