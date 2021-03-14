@@ -393,6 +393,10 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 }
 
 func (r *RingChecker) Run(ctx context.Context) error {
+	err := r.Ring.Service.StartAsync(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to start ring, %w", err)
+	}
 	ticker := time.NewTicker(r.cfg.CheckInterval)
 	for {
 		select {
