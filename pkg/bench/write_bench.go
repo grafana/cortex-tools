@@ -227,12 +227,14 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 	return cli, nil
 }
 
+// Run starts a loop that forwards metrics to the configured remote write endpoint
+// TODO: Refactor to guarantee no out of order requests and ensure writes stay up to date
 func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
 
 	batchChan := make(chan []prompb.TimeSeries)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 500; i++ {
 		level.Info(w.logger).Log("msg", "starting worker", "worker_num", strconv.Itoa(i))
 		go w.worker(batchChan)
 	}
@@ -243,8 +245,8 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			close(batchChan)
 			return nil
-		case <-ticker.C:
-			timeseries := w.workload.generateTimeSeries(w.id)
+		case now := <-ticker.C:
+			timeseries := w.workload.generateTimeSeries(w.id, now)
 			batchSize := w.cfg.BatchSize
 			var batches [][]prompb.TimeSeries
 			if batchSize < len(timeseries) {
@@ -408,7 +410,7 @@ func (r *RingChecker) Run(ctx context.Context) error {
 }
 
 func (r *RingChecker) check() {
-	timeseries := r.workload.generateTimeSeries(r.id)
+	timeseries := r.workload.generateTimeSeries(r.id, time.Now())
 
 	addrMap := map[string]int{}
 	for _, s := range timeseries {

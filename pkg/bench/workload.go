@@ -112,8 +112,8 @@ func addLabelToLabelSet(labelSets [][]prompb.Label, lbl LabelDesc) [][]prompb.La
 	return newLabelSets
 }
 
-func (w *workload) generateTimeSeries(id string) []prompb.TimeSeries {
-	now := time.Now().UnixNano() / int64(time.Millisecond)
+func (w *workload) generateTimeSeries(id string, t time.Time) []prompb.TimeSeries {
+	now := t.UnixNano() / int64(time.Millisecond)
 
 	timeseries := make([]prompb.TimeSeries, 0, w.replicas*w.totalSeries)
 	for replicaNum := 0; replicaNum < w.replicas; replicaNum++ {
