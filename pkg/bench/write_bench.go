@@ -136,7 +136,7 @@ func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.BasicAuthPasword, "bench.write.basic-auth-password", "", "Set the basic auth password on remote write requests.")
 
 	f.DurationVar(&cfg.Interval, "bench.write.interval", time.Second*15, "Interval between sending each batch of series.")
-	f.DurationVar(&cfg.Timeout, "bench.write.timeout", time.Second*30, "Write timeout for sending remote write series.")
+	f.DurationVar(&cfg.Timeout, "bench.write.timeout", time.Second*15, "Write timeout for sending remote write series.")
 	f.IntVar(&cfg.BatchSize, "bench.write.batch-size", 500, "Number of samples to send per remote-write request")
 }
 
