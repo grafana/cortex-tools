@@ -231,8 +231,8 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
 
-	batchChan := make(chan []prompb.TimeSeries, 10)
-	for i := 0; i < 10; i++ {
+	batchChan := make(chan []prompb.TimeSeries)
+	for i := 0; i < 5; i++ {
 		level.Info(w.logger).Log("msg", "starting worker", "worker_num", strconv.Itoa(i))
 		go w.worker(batchChan)
 	}
