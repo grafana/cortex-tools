@@ -226,6 +226,10 @@ func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error
 		return errors.Wrapf(err, "failed to list objects")
 	}
 
+	if len(foundDirs) != len(b.objectNames) {
+		return fmt.Errorf("expected list to return %d directories, but it returned %d", len(b.objectNames), len(foundDirs))
+	}
+
 	iteration := 0
 	for dirName, objectName := range b.objectNames {
 		b.report("validating test objects", iteration)
@@ -282,8 +286,10 @@ func (b *BucketValidationCommand) deleteTestObjects(ctx context.Context) error {
 			return errors.Errorf("Expected obj %s to not exist, but it did", objectPath)
 		}
 
+		var foundDirCount int
 		foundDeletedDir := false
 		err = b.bucketClient.Iter(ctx, b.prefix, func(dirName string) error {
+			foundDirCount++
 			if objectName == dirName {
 				foundDeletedDir = true
 			}
@@ -294,6 +300,10 @@ func (b *BucketValidationCommand) deleteTestObjects(ctx context.Context) error {
 		}
 		if foundDeletedDir {
 			return errors.Errorf("List returned directory which is supposed to be deleted.")
+		}
+		expectedDirCount := len(b.objectNames) - iteration
+		if foundDirCount != expectedDirCount {
+			return fmt.Errorf("expected list to return %d directories, but it returned %d", expectedDirCount, foundDirCount)
 		}
 	}
 	b.report("deleting test objects", iteration)
