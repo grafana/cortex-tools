@@ -156,7 +156,8 @@ type WriteBenchmarkRunner struct {
 	reg    prometheus.Registerer
 	logger log.Logger
 
-	requestDuration *prometheus.HistogramVec
+	requestDuration  *prometheus.HistogramVec
+	missedIterations prometheus.Counter
 }
 
 func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *workload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
@@ -180,6 +181,13 @@ func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *workload
 				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
 			},
 			[]string{"code"},
+		),
+		missedIterations: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "benchtool",
+				Name:      "write_iterations_late_total",
+				Help:      "Number of write intervals started late because the previous interval did not complete in time.",
+			},
 		),
 	}
 
@@ -233,17 +241,10 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
 
-	batchChan := make(chan []prompb.TimeSeries)
-	for i := 0; i < 500; i++ {
-		level.Info(w.logger).Log("msg", "starting worker", "worker_num", strconv.Itoa(i))
-		go w.worker(batchChan)
-	}
-
 	ticker := time.NewTicker(w.cfg.Interval)
 	for {
 		select {
 		case <-ctx.Done():
-			close(batchChan)
 			return nil
 		case now := <-ticker.C:
 			timeseries := w.workload.generateTimeSeries(w.id, now)
@@ -260,23 +261,24 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 				batches = [][]prompb.TimeSeries{timeseries}
 			}
 
+			eg, sendCtx := errgroup.WithContext(ctx)
+
 			for _, batch := range batches {
-				batchChan <- batch
+				eg.Go(func() error {
+					return w.sendBatch(sendCtx, batch)
+				})
 			}
+
+			err := eg.Wait()
+			if err != nil {
+				level.Error(w.logger).Log("msg", "failed to send all batches", "time", now.String(), "err", err)
+			}
+
 		}
 	}
 }
 
-func (w *WriteBenchmarkRunner) worker(batchChannel chan []prompb.TimeSeries) {
-	for batch := range batchChannel {
-		err := w.sendBatch(batch)
-		if err != nil {
-			level.Error(w.logger).Log("msg", "failed to send batch", "err", err)
-		}
-	}
-}
-
-func (w *WriteBenchmarkRunner) sendBatch(batch []prompb.TimeSeries) error {
+func (w *WriteBenchmarkRunner) sendBatch(ctx context.Context, batch []prompb.TimeSeries) error {
 	level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
 	cli, err := w.getRandomWriteClient()
 	if err != nil {
@@ -293,7 +295,7 @@ func (w *WriteBenchmarkRunner) sendBatch(batch []prompb.TimeSeries) error {
 
 	compressed := snappy.Encode(nil, data)
 
-	err = cli.Store(context.Background(), compressed)
+	err = cli.Store(ctx, compressed)
 
 	if err != nil {
 		return errors.Wrap(err, "remote-write request failed")
