@@ -241,10 +241,16 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
 
+	batchChan := make(chan batchReq, 10)
+	for i := 0; i < 20; i++ {
+		go w.writeWorker(batchChan)
+	}
+
 	ticker := time.NewTicker(w.cfg.Interval)
 	for {
 		select {
 		case <-ctx.Done():
+			close(batchChan)
 			return nil
 		case now := <-ticker.C:
 			timeseries := w.workload.generateTimeSeries(w.id, now)
@@ -261,21 +267,33 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 				batches = [][]prompb.TimeSeries{timeseries}
 			}
 
-			eg, sendCtx := errgroup.WithContext(ctx)
-
+			wg := &sync.WaitGroup{}
 			for _, batch := range batches {
 				reqBatch := batch
-				eg.Go(func() error {
-					return w.sendBatch(sendCtx, reqBatch)
-				})
+				wg.Add(1)
+				batchChan <- batchReq{reqBatch, wg}
 			}
 
-			err := eg.Wait()
-			if err != nil {
-				level.Error(w.logger).Log("msg", "failed to send all batches", "time", now.String(), "err", err)
+			wg.Wait()
+			if time.Since(now) > w.cfg.Interval {
+				w.missedIterations.Inc()
 			}
-
 		}
+	}
+}
+
+type batchReq struct {
+	batch []prompb.TimeSeries
+	wg    *sync.WaitGroup
+}
+
+func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
+	for batchReq := range batchChan {
+		err := w.sendBatch(context.Background(), batchReq.batch)
+		if err != nil {
+			level.Warn(w.logger).Log("msg", "unable to send batch", "err", err)
+		}
+		batchReq.wg.Done()
 	}
 }
 
