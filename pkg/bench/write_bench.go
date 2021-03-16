@@ -264,8 +264,9 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 			eg, sendCtx := errgroup.WithContext(ctx)
 
 			for _, batch := range batches {
+				reqBatch := batch
 				eg.Go(func() error {
-					return w.sendBatch(sendCtx, batch)
+					return w.sendBatch(sendCtx, reqBatch)
 				})
 			}
 
