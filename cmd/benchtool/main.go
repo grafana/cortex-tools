@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/flagext"
+	logutil "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -27,7 +27,7 @@ func main() {
 	flagext.RegisterFlags(&benchConfig, &LogLevelConfig, &LogFormatConfig)
 	flag.Parse()
 
-	logger, err := util.NewPrometheusLogger(LogLevelConfig, LogFormatConfig)
+	logger, err := logutil.NewPrometheusLogger(LogLevelConfig, LogFormatConfig)
 	if err != nil {
 		level.Error(logger).Log("msg", "error initializing logger", "err", err)
 		os.Exit(1)
