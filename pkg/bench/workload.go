@@ -31,9 +31,19 @@ type SeriesDesc struct {
 	Labels       []LabelDesc       `yaml:"labels"`
 }
 
+type QueryDesc struct {
+	NumQueries         int           `yaml:"num_queries"`
+	ExprTemplate       string        `yaml:"expr_template"`
+	RequiredSeriesType SeriesType    `yaml:"series_type"`
+	ChurnChance        float64       `yaml:"churn_chance"`
+	Interval           time.Duration `yaml:"interval"`
+	TimeRange          time.Duration `yaml:"time_range,omitempty"`
+}
+
 type WorkloadDesc struct {
-	Replicas int          `yaml:"replicas"`
-	Series   []SeriesDesc `yaml:"series"`
+	Replicas  int          `yaml:"replicas"`
+	Series    []SeriesDesc `yaml:"series"`
+	QueryDesc []QueryDesc  `yaml:"queries"`
 }
 
 type timeseries struct {
@@ -88,9 +98,10 @@ func newWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *workload
 	}
 
 	return &workload{
-		replicas:    workloadDesc.Replicas,
-		series:      series,
-		totalSeries: totalSeries,
+		replicas:           workloadDesc.Replicas,
+		series:             series,
+		totalSeries:        totalSeries,
+		totalSeriesTypeMap: totalSeriesTypeMap,
 	}
 }
 

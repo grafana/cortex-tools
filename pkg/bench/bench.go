@@ -20,6 +20,7 @@ type Config struct {
 
 	RingCheck RingCheckConfig  `yaml:"ring_check"`
 	Write     WriteBenchConfig `yaml:"writes"`
+	Query     QueryConfig      `yaml:"query"`
 }
 
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
@@ -32,6 +33,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.WorkloadFilePath, "bench.workload-file-path", "./workload.yaml", "path to the file containing the workload description")
 
 	cfg.Write.RegisterFlags(f)
+	cfg.Query.RegisterFlags(f)
 	cfg.RingCheck.RegisterFlagsWithPrefix("bench.ring-check.", f)
 }
 
@@ -39,6 +41,7 @@ type BenchRunner struct {
 	cfg Config
 
 	writeRunner     *WriteBenchmarkRunner
+	queryRunner     *queryRunner
 	ringCheckRunner *RingChecker
 }
 
