@@ -60,7 +60,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	}
 
 	level.Info(logger).Log("msg", "building workload")
-	workload := newWorkload(workloadDesc, prometheus.DefaultRegisterer)
+	workload := newWriteWorkload(workloadDesc, prometheus.DefaultRegisterer)
 
 	benchRunner := &BenchRunner{
 		cfg: cfg,

@@ -40,11 +40,11 @@ type RingChecker struct {
 
 	Ring         *ring.Ring
 	MemberlistKV *memberlist.KVInitService
-	workload     *workload
+	workload     *writeWorkload
 	logger       log.Logger
 }
 
-func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workload *workload, logger log.Logger) (*RingChecker, error) {
+func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workload *writeWorkload, logger log.Logger) (*RingChecker, error) {
 	r := RingChecker{
 		id:           id,
 		instanceName: instanceName,

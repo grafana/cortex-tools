@@ -130,7 +130,7 @@ func TestWorkload_generateTimeSeries(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			w := newWorkload(testCase.workloadDesc, prometheus.NewRegistry())
+			w := newWriteWorkload(testCase.workloadDesc, prometheus.NewRegistry())
 			generatedSeries := w.generateTimeSeries("test-id", time.Now())
 			require.Equal(t, testCase.numSeries, countUniqueTimeSeries(generatedSeries))
 		})

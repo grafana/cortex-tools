@@ -57,7 +57,7 @@ type WriteBenchmarkRunner struct {
 
 	dnsProvider *dns.Provider
 
-	workload *workload
+	workload *writeWorkload
 
 	reg    prometheus.Registerer
 	logger log.Logger
@@ -66,7 +66,7 @@ type WriteBenchmarkRunner struct {
 	missedIterations prometheus.Counter
 }
 
-func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *workload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
+func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *writeWorkload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
 	writeBench := &WriteBenchmarkRunner{
 		id:  id,
 		cfg: cfg,

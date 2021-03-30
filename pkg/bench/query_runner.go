@@ -1,9 +1,14 @@
 package bench
 
 import (
+	"bytes"
 	"context"
 	"flag"
+	"fmt"
+	"html/template"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,14 +31,14 @@ func (cfg *QueryConfig) RegisterFlags(f *flag.FlagSet) {
 
 type queryRunner struct {
 	id  string
-	cfg WriteBenchConfig
+	cfg QueryConfig
 
 	// Do DNS client side load balancing if configured
 	remoteMtx  sync.Mutex
 	addresses  []string
 	clientPool map[string]*writeClient
 
-	workload *workload
+	workload *queryWorkload
 
 	reg    prometheus.Registerer
 	logger log.Logger
@@ -41,7 +46,7 @@ type queryRunner struct {
 	requestDuration *prometheus.HistogramVec
 }
 
-func newQueryRunner(id string, cfg WriteBenchConfig, workload *workload, logger log.Logger, reg prometheus.Registerer) (*queryRunner, error) {
+func newQueryRunner(id string, cfg QueryConfig, workload *queryWorkload, logger log.Logger, reg prometheus.Registerer) (*queryRunner, error) {
 	runner := &queryRunner{
 		id:  id,
 		cfg: cfg,
@@ -64,10 +69,82 @@ func newQueryRunner(id string, cfg WriteBenchConfig, workload *workload, logger 
 }
 
 func (q *queryRunner) Run(ctx context.Context) error {
+	//	for _, query := range q.workload.queries {
+	// TODO: start a go function for each query to be sent to a channel
+	//}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		}
 	}
+}
+
+type query struct {
+	interval  time.Duration
+	timeRange time.Duration
+	expr      string
+}
+
+type queryWorkload struct {
+	queries []query
+}
+
+type exprTemplateData struct {
+	Name     string
+	Matchers string
+}
+
+func newQueryWorkload(desc WorkloadDesc) (*queryWorkload, error) {
+	seriesTypeMap := map[SeriesType][]SeriesDesc{
+		GaugeZero:     []SeriesDesc{},
+		GaugeRandom:   []SeriesDesc{},
+		CounterOne:    []SeriesDesc{},
+		CounterRandom: []SeriesDesc{},
+	}
+
+	for _, s := range desc.Series {
+		seriesSlice, ok := seriesTypeMap[s.Type]
+		if !ok {
+			return nil, fmt.Errorf("series found with unknown series type %s", s.Type)
+		}
+
+		seriesTypeMap[s.Type] = append(seriesSlice, s)
+	}
+
+	rand := rand.New(rand.NewSource(15391515))
+
+	queries := []query{}
+	for _, queryDesc := range desc.QueryDesc {
+		exprTemplate, err := template.New("query").Parse(queryDesc.ExprTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse query template, %v", err)
+		}
+
+		for i := 0; i < queryDesc.NumQueries; i++ {
+			seriesSlice, ok := seriesTypeMap[queryDesc.RequiredSeriesType]
+			if !ok {
+				return nil, fmt.Errorf("query found with unknown series type %s", queryDesc.RequiredSeriesType)
+			}
+
+			if len(seriesSlice) == 0 {
+				return nil, fmt.Errorf("no series found for query with series type %s", queryDesc.RequiredSeriesType)
+			}
+
+			seriesDesc := seriesSlice[rand.Intn(len(seriesSlice))]
+
+			var b bytes.Buffer
+			exprTemplate.Execute(&b, exprTemplateData{
+				Name: seriesDesc.Name,
+			})
+
+			queries = append(queries, query{
+				interval:  queryDesc.Interval,
+				timeRange: queryDesc.TimeRange,
+				expr:      b.String(),
+			})
+		}
+	}
+
+	return &queryWorkload{queries}, nil
 }

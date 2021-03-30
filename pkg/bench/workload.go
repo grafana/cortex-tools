@@ -35,7 +35,6 @@ type QueryDesc struct {
 	NumQueries         int           `yaml:"num_queries"`
 	ExprTemplate       string        `yaml:"expr_template"`
 	RequiredSeriesType SeriesType    `yaml:"series_type"`
-	ChurnChance        float64       `yaml:"churn_chance"`
 	Interval           time.Duration `yaml:"interval"`
 	TimeRange          time.Duration `yaml:"time_range,omitempty"`
 }
@@ -52,14 +51,14 @@ type timeseries struct {
 	seriesType SeriesType
 }
 
-type workload struct {
+type writeWorkload struct {
 	replicas           int
 	series             []*timeseries
 	totalSeries        int
 	totalSeriesTypeMap map[SeriesType]int
 }
 
-func newWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *workload {
+func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *writeWorkload {
 	totalSeries := 0
 	totalSeriesTypeMap := map[SeriesType]int{
 		GaugeZero:     0,
@@ -97,7 +96,7 @@ func newWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *workload
 		totalSeriesTypeMap[seriesDesc.Type] += numSeries
 	}
 
-	return &workload{
+	return &writeWorkload{
 		replicas:           workloadDesc.Replicas,
 		series:             series,
 		totalSeries:        totalSeries,
@@ -123,7 +122,7 @@ func addLabelToLabelSet(labelSets [][]prompb.Label, lbl LabelDesc) [][]prompb.La
 	return newLabelSets
 }
 
-func (w *workload) generateTimeSeries(id string, t time.Time) []prompb.TimeSeries {
+func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.TimeSeries {
 	now := t.UnixNano() / int64(time.Millisecond)
 
 	timeseries := make([]prompb.TimeSeries, 0, w.replicas*w.totalSeries)
