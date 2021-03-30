@@ -79,6 +79,17 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 			return nil, errors.Wrap(err, "unable to create ring checker")
 		}
 	}
+
+	if cfg.Query.Enabled {
+		queryWorkload, err := newQueryWorkload(cfg.ID, workloadDesc)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to create query benchmark workload")
+		}
+		benchRunner.queryRunner, err = newQueryRunner(cfg.ID, cfg.Query, queryWorkload, logger, reg)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to create query benchmark runner")
+		}
+	}
 	return benchRunner, nil
 }
 
@@ -97,5 +108,10 @@ func (b *BenchRunner) Run(ctx context.Context) error {
 		})
 	}
 
+	if b.queryRunner != nil {
+		g.Go(func() error {
+			return b.queryRunner.Run(ctx)
+		})
+	}
 	return g.Wait()
 }

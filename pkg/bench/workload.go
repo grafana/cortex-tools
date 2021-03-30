@@ -1,8 +1,11 @@
 package bench
 
 import (
+	"bytes"
 	"fmt"
+	"hash/adler32"
 	"math/rand"
+	"text/template"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -161,4 +164,61 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 	}
 
 	return timeseries
+}
+
+func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
+	seriesTypeMap := map[SeriesType][]SeriesDesc{
+		GaugeZero:     nil,
+		GaugeRandom:   nil,
+		CounterOne:    nil,
+		CounterRandom: nil,
+	}
+
+	for _, s := range desc.Series {
+		seriesSlice, ok := seriesTypeMap[s.Type]
+		if !ok {
+			return nil, fmt.Errorf("series found with unknown series type %s", s.Type)
+		}
+
+		seriesTypeMap[s.Type] = append(seriesSlice, s)
+	}
+
+	// Use the provided ID to create a random seed. This will ensure repeated runs with the same
+	// configured ID will produce the same query workloads.
+	hashSeed := adler32.Checksum([]byte(id))
+	rand := rand.New(rand.NewSource(int64(hashSeed)))
+
+	queries := []query{}
+	for _, queryDesc := range desc.QueryDesc {
+		exprTemplate, err := template.New("query").Parse(queryDesc.ExprTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse query template, %v", err)
+		}
+
+		for i := 0; i < queryDesc.NumQueries; i++ {
+			seriesSlice, ok := seriesTypeMap[queryDesc.RequiredSeriesType]
+			if !ok {
+				return nil, fmt.Errorf("query found with unknown series type %s", queryDesc.RequiredSeriesType)
+			}
+
+			if len(seriesSlice) == 0 {
+				return nil, fmt.Errorf("no series found for query with series type %s", queryDesc.RequiredSeriesType)
+			}
+
+			seriesDesc := seriesSlice[rand.Intn(len(seriesSlice))]
+
+			var b bytes.Buffer
+			exprTemplate.Execute(&b, exprTemplateData{
+				Name: seriesDesc.Name,
+			})
+
+			queries = append(queries, query{
+				interval:  queryDesc.Interval,
+				timeRange: queryDesc.TimeRange,
+				expr:      b.String(),
+			})
+		}
+	}
+
+	return &queryWorkload{queries}, nil
 }

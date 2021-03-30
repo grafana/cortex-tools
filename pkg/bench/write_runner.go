@@ -36,7 +36,7 @@ type WriteBenchConfig struct {
 }
 
 func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
-	f.BoolVar(&cfg.Enabled, "bench.write.enabled", true, "enable write benchmarking")
+	f.BoolVar(&cfg.Enabled, "bench.write.enabled", false, "enable write benchmarking")
 	f.StringVar(&cfg.Endpoint, "bench.write.endpoint", "", "Remote write endpoint.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.write.basic-auth-username", "", "Set the basic auth username on remote write requests.")
 	f.StringVar(&cfg.BasicAuthPasword, "bench.write.basic-auth-password", "", "Set the basic auth password on remote write requests.")
