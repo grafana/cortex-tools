@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"hash/adler32"
 	"html/template"
 	"math/rand"
 	"sync"
@@ -95,7 +96,7 @@ type exprTemplateData struct {
 	Matchers string
 }
 
-func newQueryWorkload(desc WorkloadDesc) (*queryWorkload, error) {
+func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 	seriesTypeMap := map[SeriesType][]SeriesDesc{
 		GaugeZero:     []SeriesDesc{},
 		GaugeRandom:   []SeriesDesc{},
@@ -112,7 +113,10 @@ func newQueryWorkload(desc WorkloadDesc) (*queryWorkload, error) {
 		seriesTypeMap[s.Type] = append(seriesSlice, s)
 	}
 
-	rand := rand.New(rand.NewSource(15391515))
+	// Use the provided ID to create a random seed. This will ensure repeated runs with the same
+	// configured ID will produce the same query workloads.
+	hashSeed := adler32.Checksum([]byte(id))
+	rand := rand.New(rand.NewSource(int64(hashSeed)))
 
 	queries := []query{}
 	for _, queryDesc := range desc.QueryDesc {
