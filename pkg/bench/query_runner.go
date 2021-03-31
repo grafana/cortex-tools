@@ -80,6 +80,17 @@ func newQueryRunner(id string, cfg QueryConfig, workload *queryWorkload, logger 
 	return runner, nil
 }
 
+// jitterUp adds random jitter to the duration.
+//
+// This adds or subtracts time from the duration within a given jitter fraction.
+// For example for 10s and jitter 0.1, it will return a time within [9s, 11s])
+//
+// Reference: https://godoc.org/github.com/grpc-ecosystem/go-grpc-middleware/util/backoffutils
+func jitterUp(duration time.Duration, jitter float64) time.Duration {
+	multiplier := jitter * (rand.Float64()*2 - 1)
+	return time.Duration(float64(duration) * (1 + multiplier))
+}
+
 func (q *queryRunner) Run(ctx context.Context) error {
 	go q.resolveAddrsLoop(ctx)
 
@@ -91,6 +102,11 @@ func (q *queryRunner) Run(ctx context.Context) error {
 		// every query has a ticker and a Go loop...
 		// not sure if this is a good idea but it should be fine
 		go func(q query) {
+			// issue the initial query with a jitter
+			firstWait := jitterUp(q.interval, 0.4)
+			time.Sleep(firstWait)
+			queryChan <- q
+
 			ticker := time.NewTicker(q.interval)
 			defer ticker.Stop()
 			for {
