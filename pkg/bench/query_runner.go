@@ -71,7 +71,7 @@ func newQueryRunner(id string, cfg QueryConfig, workload *queryWorkload, logger 
 			prometheus.HistogramOpts{
 				Namespace: "benchtool",
 				Name:      "query_request_duration_seconds",
-				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
+				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 40, 50, 60, 70, 80, 90, 120},
 			},
 			[]string{"code", "type"},
 		),
