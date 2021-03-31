@@ -74,6 +74,8 @@ func newQueryRunner(id string, cfg QueryConfig, workload *queryWorkload, logger 
 }
 
 func (q *queryRunner) Run(ctx context.Context) error {
+	go q.resolveAddrsLoop(ctx)
+
 	queryChan := make(chan query, 50)
 	for i := 0; i < 50; i++ {
 		go q.queryWorker(queryChan)
@@ -196,6 +198,10 @@ type exprTemplateData struct {
 }
 
 func (q *queryRunner) resolveAddrsLoop(ctx context.Context) {
+	err := q.resolveAddrs()
+	if err != nil {
+		level.Warn(q.logger).Log("msg", "failed update remote write servers list", "err", err)
+	}
 	ticker := time.NewTicker(time.Minute * 5)
 	defer ticker.Stop()
 
