@@ -140,14 +140,16 @@ func (w *queryRunner) getRandomAPIClient() (v1.API, error) {
 	if len(w.addresses) == 0 {
 		return nil, errors.New("no addresses found")
 	}
+
 	randomIndex := rand.Intn(len(w.addresses))
 	pick := w.addresses[randomIndex]
 
 	var cli v1.API
 	var exists bool
+	var err error
 
 	if cli, exists = w.clientPool[pick]; !exists {
-		cli, err := newQueryClient("http://"+pick+"/prometheus", w.cfg.BasicAuthUsername, w.cfg.BasicAuthPasword)
+		cli, err = newQueryClient("http://"+pick+"/prometheus", w.cfg.BasicAuthUsername, w.cfg.BasicAuthPasword)
 		if err != nil {
 			return nil, err
 		}
@@ -185,6 +187,7 @@ func (q *queryRunner) executeQuery(ctx context.Context, queryReq query) error {
 		level.Debug(q.logger).Log("msg", "sending instant query", "expr", queryReq.expr)
 		_, _, err = apiClient.Query(ctx, queryReq.expr, now)
 	}
+
 	if err != nil {
 		status = "failure"
 	}
