@@ -94,8 +94,8 @@ func jitterUp(duration time.Duration, jitter float64) time.Duration {
 func (q *queryRunner) Run(ctx context.Context) error {
 	go q.resolveAddrsLoop(ctx)
 
-	queryChan := make(chan query, 50)
-	for i := 0; i < 50; i++ {
+	queryChan := make(chan query, 1000)
+	for i := 0; i < 100; i++ {
 		go q.queryWorker(queryChan)
 	}
 	for _, queryReq := range q.workload.queries {
