@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	config_util "github.com/prometheus/common/config"
 	"github.com/thanos-io/thanos/pkg/discovery/dns"
+	"github.com/thanos-io/thanos/pkg/extprom"
 )
 
 type QueryConfig struct {
@@ -58,8 +59,14 @@ func newQueryRunner(id string, cfg QueryConfig, workload *queryWorkload, logger 
 
 		workload:   workload,
 		clientPool: map[string]v1.API{},
-		logger:     logger,
-		reg:        reg,
+		dnsProvider: dns.NewProvider(
+			logger,
+			extprom.WrapRegistererWithPrefix("benchtool_", reg),
+			dns.GolangResolverType,
+		),
+
+		logger: logger,
+		reg:    reg,
 		requestDuration: promauto.With(reg).NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "benchtool",
