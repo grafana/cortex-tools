@@ -166,6 +166,10 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 	return timeseries
 }
 
+type queryWorkload struct {
+	queries []query
+}
+
 func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 	seriesTypeMap := map[SeriesType][]SeriesDesc{
 		GaugeZero:     nil,

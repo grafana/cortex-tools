@@ -47,7 +47,7 @@ func main() {
 		panic(http.ListenAndServe(":80", nil))
 	}()
 
-	level.Info(logger).Log("msg", "starting writer-benchmarker")
+	level.Info(logger).Log("msg", "starting benchmarker")
 	err = benchmarkRunner.Run(ctx)
 	if err != nil {
 		level.Error(logger).Log("msg", "benchmarker failed", "err", err)

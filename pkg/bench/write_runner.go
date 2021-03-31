@@ -110,6 +110,9 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 	w.remoteMtx.Lock()
 	defer w.remoteMtx.Unlock()
 
+	if len(w.addresses) == 0 {
+		return nil, errors.New("no addresses found")
+	}
 	randomIndex := rand.Intn(len(w.addresses))
 	pick := w.addresses[randomIndex]
 
