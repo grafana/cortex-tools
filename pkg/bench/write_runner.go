@@ -29,10 +29,6 @@ type WriteBenchConfig struct {
 	Endpoint          string `yaml:"endpoint"`
 	BasicAuthUsername string `yaml:"basic_auth_username"`
 	BasicAuthPasword  string `yaml:"basic_auth_password"`
-
-	Interval  time.Duration `yaml:"interval"`
-	Timeout   time.Duration `yaml:"timeout"`
-	BatchSize int           `yaml:"batch_size"`
 }
 
 func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
@@ -40,10 +36,6 @@ func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.Endpoint, "bench.write.endpoint", "", "Remote write endpoint.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.write.basic-auth-username", "", "Set the basic auth username on remote write requests.")
 	f.StringVar(&cfg.BasicAuthPasword, "bench.write.basic-auth-password", "", "Set the basic auth password on remote write requests.")
-
-	f.DurationVar(&cfg.Interval, "bench.write.interval", time.Second*15, "Interval between sending each batch of series.")
-	f.DurationVar(&cfg.Timeout, "bench.write.timeout", time.Second*15, "Write timeout for sending remote write series.")
-	f.IntVar(&cfg.BatchSize, "bench.write.batch-size", 500, "Number of samples to send per remote-write request")
 }
 
 type WriteBenchmarkRunner struct {
@@ -126,7 +118,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 		}
 		cli, err = newWriteClient("bench-"+pick, &remote.ClientConfig{
 			URL:     &config.URL{URL: u},
-			Timeout: model.Duration(w.cfg.Timeout),
+			Timeout: model.Duration(w.workload.options.Timeout),
 
 			HTTPClientConfig: config.HTTPClientConfig{
 				BasicAuth: &config.BasicAuth{
@@ -155,7 +147,7 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 		go w.writeWorker(batchChan)
 	}
 
-	ticker := time.NewTicker(w.cfg.Interval)
+	ticker := time.NewTicker(w.workload.options.Interval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -163,7 +155,7 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 			return nil
 		case now := <-ticker.C:
 			timeseries := w.workload.generateTimeSeries(w.id, now)
-			batchSize := w.cfg.BatchSize
+			batchSize := w.workload.options.BatchSize
 			var batches [][]prompb.TimeSeries
 			if batchSize < len(timeseries) {
 				batches = make([][]prompb.TimeSeries, 0, (len(timeseries)+batchSize-1)/batchSize)
@@ -184,7 +176,7 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 			}
 
 			wg.Wait()
-			if time.Since(now) > w.cfg.Interval {
+			if time.Since(now) > w.workload.options.Interval {
 				w.missedIterations.Inc()
 			}
 		}

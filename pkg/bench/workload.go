@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/adler32"
 	"math/rand"
+	"strings"
 	"text/template"
 	"time"
 
@@ -35,17 +36,26 @@ type SeriesDesc struct {
 }
 
 type QueryDesc struct {
-	NumQueries         int           `yaml:"num_queries"`
-	ExprTemplate       string        `yaml:"expr_template"`
-	RequiredSeriesType SeriesType    `yaml:"series_type"`
-	Interval           time.Duration `yaml:"interval"`
-	TimeRange          time.Duration `yaml:"time_range,omitempty"`
+	NumQueries               int           `yaml:"num_queries"`
+	ExprTemplate             string        `yaml:"expr_template"`
+	RequiredSeriesType       SeriesType    `yaml:"series_type"`
+	Interval                 time.Duration `yaml:"interval"`
+	TimeRange                time.Duration `yaml:"time_range,omitempty"`
+	Regex                    bool          `yaml:"regex"`
+	InjectExactSerierMatcher bool          `yaml:"inject_exact_series_matcher"`
+}
+
+type WriteDesc struct {
+	Interval  time.Duration `yaml:"interval"`
+	Timeout   time.Duration `yaml:"timeout"`
+	BatchSize int           `yaml:"batch_size"`
 }
 
 type WorkloadDesc struct {
 	Replicas  int          `yaml:"replicas"`
 	Series    []SeriesDesc `yaml:"series"`
 	QueryDesc []QueryDesc  `yaml:"queries"`
+	Write     WriteDesc    `yaml:"write_options"`
 }
 
 type timeseries struct {
@@ -59,6 +69,8 @@ type writeWorkload struct {
 	series             []*timeseries
 	totalSeries        int
 	totalSeriesTypeMap map[SeriesType]int
+
+	options WriteDesc
 }
 
 func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *writeWorkload {
@@ -99,11 +111,27 @@ func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *wri
 		totalSeriesTypeMap[seriesDesc.Type] += numSeries
 	}
 
+	// Set batch size to 500 samples if not set
+	if workloadDesc.Write.BatchSize == 0 {
+		workloadDesc.Write.BatchSize = 500
+	}
+
+	// Set the write interval to 15 seconds if not set
+	if workloadDesc.Write.Interval == 0 {
+		workloadDesc.Write.Interval = time.Second * 15
+	}
+
+	// Set the write timeout to 15 seconds if not set
+	if workloadDesc.Write.Timeout == 0 {
+		workloadDesc.Write.Timeout = time.Second * 15
+	}
+
 	return &writeWorkload{
 		replicas:           workloadDesc.Replicas,
 		series:             series,
 		totalSeries:        totalSeries,
 		totalSeriesTypeMap: totalSeriesTypeMap,
+		options:            workloadDesc.Write,
 	}
 }
 
@@ -130,7 +158,8 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 
 	timeseries := make([]prompb.TimeSeries, 0, w.replicas*w.totalSeries)
 	for replicaNum := 0; replicaNum < w.replicas; replicaNum++ {
-		replicaLabel := prompb.Label{Name: "bench_replica", Value: fmt.Sprintf("%s-replica-%05d", id, replicaNum)}
+		replicaLabel := prompb.Label{Name: "bench_replica", Value: fmt.Sprintf("replica-%05d", replicaNum)}
+		idLabel := prompb.Label{Name: "bench_id", Value: id}
 		for _, series := range w.series {
 			var value float64
 			switch series.seriesType {
@@ -147,11 +176,12 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 			}
 			series.lastValue = value
 			for _, labelSet := range series.labelSets {
-				newLabelSet := make([]prompb.Label, len(labelSet)+1)
+				newLabelSet := make([]prompb.Label, len(labelSet)+2)
 				for i := range labelSet {
 					newLabelSet[i] = labelSet[i]
 				}
-				newLabelSet[len(newLabelSet)-1] = replicaLabel
+				newLabelSet[len(newLabelSet)-2] = replicaLabel
+				newLabelSet[len(newLabelSet)-1] = idLabel
 				timeseries = append(timeseries, prompb.TimeSeries{
 					Labels: newLabelSet,
 					Samples: []prompb.Sample{{
@@ -168,6 +198,17 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 
 type queryWorkload struct {
 	queries []query
+}
+
+type exprTemplateData struct {
+	Name     string
+	Matchers string
+}
+
+type query struct {
+	interval  time.Duration
+	timeRange time.Duration
+	expr      string
 }
 
 func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
@@ -194,7 +235,7 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 
 	queries := []query{}
 	for _, queryDesc := range desc.QueryDesc {
-		exprTemplate, err := template.New("query").Parse(queryDesc.ExprTemplate)
+		exprTemplate, err := template.New("query").Delims("<<", ">>").Parse(queryDesc.ExprTemplate)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse query template, %v", err)
 		}
@@ -211,9 +252,24 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 
 			seriesDesc := seriesSlice[rand.Intn(len(seriesSlice))]
 
+			matchers := []string{}
+
+			// Select a random bench replica to inject as a matcher
+			replicaNum := rand.Intn(desc.Replicas)
+			if queryDesc.Regex {
+				matchers = append(matchers, "bench_replica=\""+fmt.Sprintf("replica-%05d", replicaNum)+"\"")
+			} else {
+				matchers = append(matchers, "bench_replica=~\""+fmt.Sprintf("replica-%05d", replicaNum)+"\"")
+			}
+
+			if queryDesc.InjectExactSerierMatcher {
+
+			}
+
 			var b bytes.Buffer
 			exprTemplate.Execute(&b, exprTemplateData{
-				Name: seriesDesc.Name,
+				Name:     seriesDesc.Name,
+				Matchers: strings.Join(matchers, ", "),
 			})
 
 			queries = append(queries, query{
