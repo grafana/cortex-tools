@@ -34,7 +34,7 @@ func (cfg *QueryConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.Endpoint, "bench.query.endpoint", "", "Remote query endpoint.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.query.basic-auth-username", "", "Set the basic auth username on remote query requests.")
 	f.StringVar(&cfg.BasicAuthPasword, "bench.query.basic-auth-password", "", "Set the basic auth password on remote query requests.")
-	f.StringVar(&cfg.TenantName, "bench.write.tenant-name", "", "Set the X-Scope-OrgID on remote write requests.")
+	f.StringVar(&cfg.TenantName, "bench.query.tenant-name", "", "Set the X-Scope-OrgID on query requests.")
 }
 
 type queryRunner struct {
