@@ -67,7 +67,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	}
 
 	if cfg.Write.Enabled {
-		benchRunner.writeRunner, err = NewWriteBenchmarkRunner(cfg.ID, cfg.Write, workload, logger, reg)
+		benchRunner.writeRunner, err = NewWriteBenchmarkRunner(cfg.ID, cfg.InstanceName, cfg.Write, workload, logger, reg)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to create write benchmarker")
 		}
@@ -85,7 +85,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to create query benchmark workload")
 		}
-		benchRunner.queryRunner, err = newQueryRunner(cfg.ID, cfg.Query, queryWorkload, logger, reg)
+		benchRunner.queryRunner, err = newQueryRunner(cfg.ID, cfg.InstanceName, cfg.Query, queryWorkload, logger, reg)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to create query benchmark runner")
 		}

@@ -29,7 +29,6 @@ type WriteBenchConfig struct {
 	Endpoint          string `yaml:"endpoint"`
 	BasicAuthUsername string `yaml:"basic_auth_username"`
 	BasicAuthPasword  string `yaml:"basic_auth_password"`
-	TenantName        string `yaml:"tenant_name"`
 }
 
 func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
@@ -37,12 +36,12 @@ func (cfg *WriteBenchConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.Endpoint, "bench.write.endpoint", "", "Remote write endpoint.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.write.basic-auth-username", "", "Set the basic auth username on remote write requests.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.write.basic-auth-username", "", "Set the basic auth username on remote write requests.")
-	f.StringVar(&cfg.TenantName, "bench.write.tenant-name", "", "Set the X-Scope-OrgID on remote write requests.")
 }
 
 type WriteBenchmarkRunner struct {
-	id  string
-	cfg WriteBenchConfig
+	id         string
+	tenantName string
+	cfg        WriteBenchConfig
 
 	// Do DNS client side load balancing if configured
 	remoteMtx  sync.Mutex
@@ -60,10 +59,11 @@ type WriteBenchmarkRunner struct {
 	missedIterations prometheus.Counter
 }
 
-func NewWriteBenchmarkRunner(id string, cfg WriteBenchConfig, workload *writeWorkload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
+func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig, workload *writeWorkload, logger log.Logger, reg prometheus.Registerer) (*WriteBenchmarkRunner, error) {
 	writeBench := &WriteBenchmarkRunner{
-		id:  id,
-		cfg: cfg,
+		id:         id,
+		tenantName: tenantName,
+		cfg:        cfg,
 
 		workload: workload,
 		dnsProvider: dns.NewProvider(
@@ -118,7 +118,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 		if err != nil {
 			return nil, err
 		}
-		cli, err = newWriteClient("bench-"+pick, w.cfg.TenantName, &remote.ClientConfig{
+		cli, err = newWriteClient("bench-"+pick, w.tenantName, &remote.ClientConfig{
 			URL:     &config.URL{URL: u},
 			Timeout: model.Duration(w.workload.options.Timeout),
 
