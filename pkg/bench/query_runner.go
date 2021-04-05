@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ type QueryConfig struct {
 	Endpoint          string `yaml:"endpoint"`
 	BasicAuthUsername string `yaml:"basic_auth_username"`
 	BasicAuthPasword  string `yaml:"basic_auth_password"`
+	TenantName        string `yaml:"tenant_name"`
 }
 
 func (cfg *QueryConfig) RegisterFlags(f *flag.FlagSet) {
@@ -32,6 +34,7 @@ func (cfg *QueryConfig) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.Endpoint, "bench.query.endpoint", "", "Remote query endpoint.")
 	f.StringVar(&cfg.BasicAuthUsername, "bench.query.basic-auth-username", "", "Set the basic auth username on remote query requests.")
 	f.StringVar(&cfg.BasicAuthPasword, "bench.query.basic-auth-password", "", "Set the basic auth password on remote query requests.")
+	f.StringVar(&cfg.TenantName, "bench.write.tenant-name", "", "Set the X-Scope-OrgID on remote write requests.")
 }
 
 type queryRunner struct {
@@ -137,10 +140,25 @@ func (q *queryRunner) queryWorker(queryChan chan query) {
 	}
 }
 
-func newQueryClient(url, username, password string) (v1.API, error) {
+type tenantIDRoundTripper struct {
+	tenantName string
+	next       http.RoundTripper
+}
+
+func (r *tenantIDRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.tenantName != "" {
+		req.Header.Set("X-Scope-OrgID", r.tenantName)
+	}
+	return r.next.RoundTrip(req)
+}
+
+func newQueryClient(url, tenantName, username, password string) (v1.API, error) {
 	apiClient, err := api.NewClient(api.Config{
-		Address:      url,
-		RoundTripper: config_util.NewBasicAuthRoundTripper(username, config_util.Secret(password), "", api.DefaultRoundTripper),
+		Address: url,
+		RoundTripper: &tenantIDRoundTripper{
+			tenantName: tenantName,
+			next:       config_util.NewBasicAuthRoundTripper(username, config_util.Secret(password), "", api.DefaultRoundTripper),
+		},
 	})
 
 	if err != nil {
@@ -165,7 +183,7 @@ func (w *queryRunner) getRandomAPIClient() (v1.API, error) {
 	var err error
 
 	if cli, exists = w.clientPool[pick]; !exists {
-		cli, err = newQueryClient("http://"+pick+"/prometheus", w.cfg.BasicAuthUsername, w.cfg.BasicAuthPasword)
+		cli, err = newQueryClient("http://"+pick+"/prometheus", w.cfg.TenantName, w.cfg.BasicAuthUsername, w.cfg.BasicAuthPasword)
 		if err != nil {
 			return nil, err
 		}

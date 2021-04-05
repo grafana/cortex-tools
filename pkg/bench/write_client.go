@@ -30,13 +30,14 @@ type writeClient struct {
 	url        *config_util.URL
 	Client     *http.Client
 	timeout    time.Duration
+	tenantName string
 
 	requestDuration *prometheus.HistogramVec
 }
 
 // newWriteClient creates a new client for remote write.
-func newWriteClient(name string, conf *remote.ClientConfig, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
-	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "remote_storage_write_client", false, false)
+func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
+	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "bench_write_client", false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +52,7 @@ func newWriteClient(name string, conf *remote.ClientConfig, requestHistogram *pr
 		url:        conf.URL,
 		Client:     httpClient,
 		timeout:    time.Duration(conf.Timeout),
+		tenantName: tenantName,
 
 		requestDuration: requestHistogram,
 	}, nil
@@ -71,6 +73,9 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", UserAgent)
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+	if c.tenantName != "" {
+		httpReq.Header.Set("X-Scope-OrgID", c.tenantName)
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
