@@ -78,7 +78,7 @@ func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig,
 			prometheus.HistogramOpts{
 				Namespace: "benchtool",
 				Name:      "write_request_duration_seconds",
-				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
+				Buckets:   []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 120},
 			},
 			[]string{"code"},
 		),
@@ -139,7 +139,6 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 }
 
 // Run starts a loop that forwards metrics to the configured remote write endpoint
-// TODO: Refactor to guarantee no out of order requests and ensure writes stay up to date
 func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
