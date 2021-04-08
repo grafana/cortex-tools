@@ -18,8 +18,6 @@ e2ealerting: cmd/e2ealerting/e2ealerting
 benchtool-image:
 	$(SUDO) docker build -t $(IMAGE_PREFIX)/benchtool -f cmd/benchtool/Dockerfile .
 	$(SUDO) docker tag $(IMAGE_PREFIX)/benchtool $(IMAGE_PREFIX)/benchtool:$(IMAGE_TAG)
-	$(SUDO) docker tag $(IMAGE_PREFIX)/benchtool jtlisi/benchtool:$(IMAGE_TAG)
-	$(SUDO) docker push jtlisi/benchtool:$(IMAGE_TAG)
 
 cortextool-image:
 	$(SUDO) docker build -t $(IMAGE_PREFIX)/cortextool -f cmd/cortextool/Dockerfile .
