@@ -7,7 +7,7 @@ GIT_REVISION := $(shell git rev-parse --short HEAD)
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 GO_FLAGS := -mod=vendor -ldflags "-extldflags \"-static\" -s -w -X $(VPREFIX).Branch=$(GIT_BRANCH) -X $(VPREFIX).Version=$(IMAGE_TAG) -X $(VPREFIX).Revision=$(GIT_REVISION)" -tags netgo
 
-all: benchtool cortextool chunktool logtool
+all: cortextool chunktool logtool
 images: cortextool-image chunktool-image logtool-image benchtool-image
 benchtool: cmd/benchtool/benchtool
 cortextool: cmd/cortextool/cortextool
