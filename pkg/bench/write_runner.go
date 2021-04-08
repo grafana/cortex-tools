@@ -144,7 +144,7 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	go w.resolveAddrsLoop(ctx)
 
 	batchChan := make(chan batchReq, 10)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < w.workload.replicas*10; i++ {
 		go w.writeWorker(batchChan)
 	}
 
