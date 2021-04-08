@@ -128,7 +128,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 					Password: config.Secret(w.cfg.BasicAuthPasword),
 				},
 			},
-		}, w.requestDuration)
+		}, w.logger, w.requestDuration)
 		if err != nil {
 			return nil, err
 		}

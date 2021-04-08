@@ -109,7 +109,7 @@ func (r *RingChecker) check() {
 			if !exists {
 				addrMap[addr] = 0
 			}
-			addrMap[addr] += 1
+			addrMap[addr]++
 		}
 	}
 

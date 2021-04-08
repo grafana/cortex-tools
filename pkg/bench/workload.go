@@ -140,9 +140,8 @@ func addLabelToLabelSet(labelSets [][]prompb.Label, lbl LabelDesc) [][]prompb.La
 	for i := 0; i < lbl.UniqueValues; i++ {
 		for _, labelSet := range labelSets {
 			newSet := make([]prompb.Label, len(labelSet)+1)
-			for i := range labelSet {
-				newSet[i] = labelSet[i]
-			}
+			copy(newSet, labelSet)
+
 			newSet[len(newSet)-1] = prompb.Label{
 				Name:  lbl.Name,
 				Value: fmt.Sprintf("%s-%v", lbl.ValuePrefix, i),
@@ -177,9 +176,8 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 			series.lastValue = value
 			for _, labelSet := range series.labelSets {
 				newLabelSet := make([]prompb.Label, len(labelSet)+2)
-				for i := range labelSet {
-					newLabelSet[i] = labelSet[i]
-				}
+				copy(newLabelSet, labelSet)
+
 				newLabelSet[len(newLabelSet)-2] = replicaLabel
 				newLabelSet[len(newLabelSet)-1] = idLabel
 				timeseries = append(timeseries, prompb.TimeSeries{
@@ -263,10 +261,13 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 			}
 
 			var b bytes.Buffer
-			exprTemplate.Execute(&b, exprTemplateData{
+			err = exprTemplate.Execute(&b, exprTemplateData{
 				Name:     seriesDesc.Name,
 				Matchers: strings.Join(matchers, ", "),
 			})
+			if err != nil {
+				return nil, fmt.Errorf("unable to execute expr_template %s, %w", queryDesc.ExprTemplate, err)
+			}
 
 			queries = append(queries, query{
 				interval:  queryDesc.Interval,

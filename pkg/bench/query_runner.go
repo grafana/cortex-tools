@@ -123,11 +123,10 @@ func (q *queryRunner) Run(ctx context.Context) error {
 		}(queryReq)
 	}
 	for {
-		select {
-		case <-ctx.Done():
-			close(queryChan)
-			return nil
-		}
+		<-ctx.Done()
+		close(queryChan)
+		return nil
+
 	}
 }
 
@@ -167,27 +166,27 @@ func newQueryClient(url, tenantName, username, password string) (v1.API, error) 
 	return v1.NewAPI(apiClient), nil
 }
 
-func (w *queryRunner) getRandomAPIClient() (v1.API, error) {
-	w.remoteMtx.Lock()
-	defer w.remoteMtx.Unlock()
+func (q *queryRunner) getRandomAPIClient() (v1.API, error) {
+	q.remoteMtx.Lock()
+	defer q.remoteMtx.Unlock()
 
-	if len(w.addresses) == 0 {
+	if len(q.addresses) == 0 {
 		return nil, errors.New("no addresses found")
 	}
 
-	randomIndex := rand.Intn(len(w.addresses))
-	pick := w.addresses[randomIndex]
+	randomIndex := rand.Intn(len(q.addresses))
+	pick := q.addresses[randomIndex]
 
 	var cli v1.API
 	var exists bool
 	var err error
 
-	if cli, exists = w.clientPool[pick]; !exists {
-		cli, err = newQueryClient("http://"+pick+"/prometheus", w.tenantName, w.cfg.BasicAuthUsername, w.cfg.BasicAuthPasword)
+	if cli, exists = q.clientPool[pick]; !exists {
+		cli, err = newQueryClient("http://"+pick+"/prometheus", q.tenantName, q.cfg.BasicAuthUsername, q.cfg.BasicAuthPasword)
 		if err != nil {
 			return nil, err
 		}
-		w.clientPool[pick] = cli
+		q.clientPool[pick] = cli
 	}
 
 	return cli, nil

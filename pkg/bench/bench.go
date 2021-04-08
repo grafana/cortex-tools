@@ -37,7 +37,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	cfg.RingCheck.RegisterFlagsWithPrefix("bench.ring-check.", f)
 }
 
-type BenchRunner struct {
+type Runner struct {
 	cfg Config
 
 	writeRunner     *WriteBenchmarkRunner
@@ -45,7 +45,7 @@ type BenchRunner struct {
 	ringCheckRunner *RingChecker
 }
 
-func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*BenchRunner, error) {
+func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*Runner, error) {
 	// Load workload file
 
 	content, err := os.ReadFile(cfg.WorkloadFilePath)
@@ -62,7 +62,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	level.Info(logger).Log("msg", "building workload")
 	workload := newWriteWorkload(workloadDesc, prometheus.DefaultRegisterer)
 
-	benchRunner := &BenchRunner{
+	benchRunner := &Runner{
 		cfg: cfg,
 	}
 
@@ -93,7 +93,7 @@ func NewBenchRunner(cfg Config, logger log.Logger, reg prometheus.Registerer) (*
 	return benchRunner, nil
 }
 
-func (b *BenchRunner) Run(ctx context.Context) error {
+func (b *Runner) Run(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	if b.writeRunner != nil {

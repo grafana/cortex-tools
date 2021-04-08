@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,11 +34,12 @@ type writeClient struct {
 	timeout    time.Duration
 	tenantName string
 
+	logger          log.Logger
 	requestDuration *prometheus.HistogramVec
 }
 
 // newWriteClient creates a new client for remote write.
-func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
+func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, logger log.Logger, requestHistogram *prometheus.HistogramVec) (*writeClient, error) {
 	httpClient, err := config_util.NewClientFromConfig(conf.HTTPClientConfig, "bench_write_client", false, false)
 	if err != nil {
 		return nil, err
@@ -92,7 +95,10 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 	c.requestDuration.WithLabelValues(strconv.Itoa(httpResp.StatusCode)).Observe(time.Since(start).Seconds())
 
 	defer func() {
-		io.Copy(ioutil.Discard, httpResp.Body)
+		_, err := io.Copy(ioutil.Discard, httpResp.Body)
+		if err != nil {
+			level.Error(c.logger).Log("msg", "unable to discard write request body", "err", err)
+		}
 		httpResp.Body.Close()
 	}()
 
