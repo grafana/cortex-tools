@@ -262,10 +262,6 @@ func newQueryWorkload(id string, desc WorkloadDesc) (*queryWorkload, error) {
 				matchers = append(matchers, "bench_replica=~\""+fmt.Sprintf("replica-%05d", replicaNum)+"\"")
 			}
 
-			if queryDesc.InjectExactSerierMatcher {
-
-			}
-
 			var b bytes.Buffer
 			exprTemplate.Execute(&b, exprTemplateData{
 				Name:     seriesDesc.Name,
