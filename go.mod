@@ -1,6 +1,6 @@
 module github.com/grafana/cortex-tools
 
-go 1.14
+go 1.16
 
 require (
 	cloud.google.com/go/bigtable v1.2.0
@@ -34,6 +34,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20210215121130-6f488061dfb4
 	github.com/sirupsen/logrus v1.7.0
 	github.com/stretchr/testify v1.7.0
+	github.com/thanos-io/thanos v0.13.1-0.20210226164558-03dace0a1aa1
 	github.com/weaveworks/common v0.0.0-20210112142934-23c8d7fa6120
 	go.uber.org/atomic v1.7.0
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
