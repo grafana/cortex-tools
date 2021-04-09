@@ -42,7 +42,7 @@ type queryRunner struct {
 
 	// Do DNS client side load balancing if configured
 	dnsProvider *dns.Provider
-	remoteMtx   sync.Mutex
+	addressMtx  sync.Mutex
 	addresses   []string
 	clientPool  map[string]v1.API
 
@@ -104,18 +104,18 @@ func (q *queryRunner) Run(ctx context.Context) error {
 	for _, queryReq := range q.workload.queries {
 		// every query has a ticker and a Go loop...
 		// not sure if this is a good idea but it should be fine
-		go func(q query) {
+		go func(req query) {
 			// issue the initial query with a jitter
-			firstWait := jitterUp(q.interval, 0.4)
+			firstWait := jitterUp(req.interval, 0.4)
 			time.Sleep(firstWait)
-			queryChan <- q
+			queryChan <- req
 
-			ticker := time.NewTicker(q.interval)
+			ticker := time.NewTicker(req.interval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					queryChan <- q
+					queryChan <- req
 				case <-ctx.Done():
 					return
 				}
@@ -167,8 +167,8 @@ func newQueryClient(url, tenantName, username, password string) (v1.API, error) 
 }
 
 func (q *queryRunner) getRandomAPIClient() (v1.API, error) {
-	q.remoteMtx.Lock()
-	defer q.remoteMtx.Unlock()
+	q.addressMtx.Lock()
+	defer q.addressMtx.Unlock()
 
 	if len(q.addresses) == 0 {
 		return nil, errors.New("no addresses found")
@@ -266,9 +266,9 @@ func (q *queryRunner) resolveAddrs() error {
 		return errors.New("no server address resolved")
 	}
 
-	q.remoteMtx.Lock()
+	q.addressMtx.Lock()
 	q.addresses = servers
-	q.remoteMtx.Unlock()
+	q.addressMtx.Unlock()
 
 	return nil
 }

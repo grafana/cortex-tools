@@ -24,7 +24,7 @@ import (
 
 const maxErrMsgLen = 512
 
-var UserAgent = fmt.Sprintf("Prometheus/%s", version.Version)
+var UserAgent = fmt.Sprintf("Benchtool/%s", version.Version)
 
 // writeClient allows reading and writing from/to a remote HTTP endpoint.
 type writeClient struct {
