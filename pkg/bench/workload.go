@@ -2,14 +2,17 @@ package bench
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash/adler32"
 	"math/rand"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/prometheus/prompb"
 )
 
@@ -69,6 +72,9 @@ type writeWorkload struct {
 	series             []*timeseries
 	totalSeries        int
 	totalSeriesTypeMap map[SeriesType]int
+
+	writePool        *sync.Pool
+	missedIterations prometheus.Counter
 
 	options WriteDesc
 }
@@ -132,6 +138,20 @@ func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *wri
 		totalSeries:        totalSeries,
 		totalSeriesTypeMap: totalSeriesTypeMap,
 		options:            workloadDesc.Write,
+
+		writePool: &sync.Pool{
+			New: func() interface{} {
+				// return a pool that creates buffers the exact size of the batch size
+				return make([]prompb.TimeSeries, 0, workloadDesc.Write.BatchSize)
+			},
+		},
+		missedIterations: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Namespace: "benchtool",
+				Name:      "write_iterations_late_total",
+				Help:      "Number of write intervals started late because the previous interval did not complete in time.",
+			},
+		),
 	}
 }
 
@@ -192,6 +212,77 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 	}
 
 	return timeseries
+}
+
+type batchReq struct {
+	batch   []prompb.TimeSeries
+	wg      *sync.WaitGroup
+	putBack *sync.Pool
+}
+
+func (w *writeWorkload) generateWriteBatch(ctx context.Context, id string, seriesChan chan batchReq) error {
+	seriesBuffer := w.writePool.Get().([]prompb.TimeSeries)
+	ticker := time.NewTicker(w.options.Interval)
+
+	defer close(seriesChan)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case timeNow := <-ticker.C:
+			now := timeNow.UnixNano() / int64(time.Millisecond)
+			wg := &sync.WaitGroup{}
+			for replicaNum := 0; replicaNum < w.replicas; replicaNum++ {
+				replicaLabel := prompb.Label{Name: "bench_replica", Value: fmt.Sprintf("replica-%05d", replicaNum)}
+				idLabel := prompb.Label{Name: "bench_id", Value: id}
+				for _, series := range w.series {
+					var value float64
+					switch series.seriesType {
+					case GaugeZero:
+						value = 0
+					case GaugeRandom:
+						value = rand.Float64()
+					case CounterOne:
+						value = series.lastValue + 1
+					case CounterRandom:
+						value = series.lastValue + float64(rand.Int())
+					default:
+						return fmt.Errorf("unknown series type %v", series.seriesType)
+					}
+					series.lastValue = value
+					for _, labelSet := range series.labelSets {
+						if len(seriesBuffer) == w.options.BatchSize {
+							wg.Add(1)
+							seriesChan <- batchReq{seriesBuffer, wg, w.writePool}
+							seriesBuffer = w.writePool.Get().([]prompb.TimeSeries)
+						}
+						newLabelSet := make([]prompb.Label, len(labelSet)+2)
+						copy(newLabelSet, labelSet)
+
+						newLabelSet[len(newLabelSet)-2] = replicaLabel
+						newLabelSet[len(newLabelSet)-1] = idLabel
+						seriesBuffer = append(seriesBuffer, prompb.TimeSeries{
+							Labels: newLabelSet,
+							Samples: []prompb.Sample{{
+								Timestamp: now,
+								Value:     value,
+							}},
+						})
+					}
+				}
+			}
+			if len(seriesBuffer) > 0 {
+				wg.Add(1)
+				seriesChan <- batchReq{seriesBuffer, wg, w.writePool}
+				seriesBuffer = w.writePool.Get().([]prompb.TimeSeries)
+			}
+			wg.Wait()
+			if time.Since(timeNow) > w.options.Interval {
+				w.missedIterations.Inc()
+			}
+		}
+	}
 }
 
 type queryWorkload struct {
