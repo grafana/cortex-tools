@@ -73,10 +73,11 @@ type writeWorkload struct {
 	totalSeries        int
 	totalSeriesTypeMap map[SeriesType]int
 
-	writePool        *sync.Pool
 	missedIterations prometheus.Counter
 
 	options WriteDesc
+
+	seriesBufferChan chan []prompb.TimeSeries
 }
 
 func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *writeWorkload {
@@ -139,12 +140,6 @@ func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *wri
 		totalSeriesTypeMap: totalSeriesTypeMap,
 		options:            workloadDesc.Write,
 
-		writePool: &sync.Pool{
-			New: func() interface{} {
-				// return a pool that creates buffers the exact size of the batch size
-				return make([]prompb.TimeSeries, 0, workloadDesc.Write.BatchSize)
-			},
-		},
 		missedIterations: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "benchtool",
@@ -217,11 +212,25 @@ func (w *writeWorkload) generateTimeSeries(id string, t time.Time) []prompb.Time
 type batchReq struct {
 	batch   []prompb.TimeSeries
 	wg      *sync.WaitGroup
-	putBack *sync.Pool
+	putBack chan []prompb.TimeSeries
 }
 
-func (w *writeWorkload) generateWriteBatch(ctx context.Context, id string, seriesChan chan batchReq) error {
-	seriesBuffer := w.writePool.Get().([]prompb.TimeSeries)
+func (w *writeWorkload) getSeriesBuffer(ctx context.Context) []prompb.TimeSeries {
+	select {
+	case <-ctx.Done():
+		return nil
+	case seriesBuffer := <-w.seriesBufferChan:
+		return seriesBuffer[:0]
+	}
+}
+
+func (w *writeWorkload) generateWriteBatch(ctx context.Context, id string, numBuffers int, seriesChan chan batchReq) error {
+	w.seriesBufferChan = make(chan []prompb.TimeSeries, numBuffers)
+	for i := 0; i < numBuffers; i++ {
+		w.seriesBufferChan <- make([]prompb.TimeSeries, 0, w.options.BatchSize)
+	}
+
+	seriesBuffer := w.getSeriesBuffer(ctx)
 	ticker := time.NewTicker(w.options.Interval)
 
 	defer close(seriesChan)
@@ -254,8 +263,8 @@ func (w *writeWorkload) generateWriteBatch(ctx context.Context, id string, serie
 					for _, labelSet := range series.labelSets {
 						if len(seriesBuffer) == w.options.BatchSize {
 							wg.Add(1)
-							seriesChan <- batchReq{seriesBuffer, wg, w.writePool}
-							seriesBuffer = w.writePool.Get().([]prompb.TimeSeries)
+							seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
+							seriesBuffer = w.getSeriesBuffer(ctx)
 						}
 						newLabelSet := make([]prompb.Label, len(labelSet)+2)
 						copy(newLabelSet, labelSet)
@@ -274,8 +283,8 @@ func (w *writeWorkload) generateWriteBatch(ctx context.Context, id string, serie
 			}
 			if len(seriesBuffer) > 0 {
 				wg.Add(1)
-				seriesChan <- batchReq{seriesBuffer, wg, w.writePool}
-				seriesBuffer = w.writePool.Get().([]prompb.TimeSeries)
+				seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
+				seriesBuffer = w.getSeriesBuffer(ctx)
 			}
 			wg.Wait()
 			if time.Since(timeNow) > w.options.Interval {

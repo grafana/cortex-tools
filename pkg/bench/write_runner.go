@@ -135,12 +135,16 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// Start a loop to re-resolve addresses every 5 minutes
 	go w.resolveAddrsLoop(ctx)
 
+	// Run replicas * 10 write client workers.
+	// This number will also be used for the number of series buffers to store at once.
+	numWorkers := w.workload.replicas * 10
+
 	batchChan := make(chan batchReq, 10)
-	for i := 0; i < w.workload.replicas*10; i++ {
+	for i := 0; i < numWorkers; i++ {
 		go w.writeWorker(batchChan)
 	}
 
-	return w.workload.generateWriteBatch(ctx, w.id, batchChan)
+	return w.workload.generateWriteBatch(ctx, w.id, numWorkers+10, batchChan)
 }
 
 func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
@@ -151,7 +155,7 @@ func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
 		}
 
 		// put back the series buffer
-		batchReq.putBack.Put(batchReq.batch)
+		batchReq.putBack <- batchReq.batch
 		batchReq.wg.Done()
 	}
 }
