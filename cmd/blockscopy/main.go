@@ -157,13 +157,13 @@ func copyBlocks(ctx context.Context, cfg config, logger log.Logger) error {
 
 			logger := log.With(logger, "block", blockID)
 
-			if markers[blockID].deletion {
-				level.Debug(logger).Log("msg", "skipping block because it's marked for deletion")
+			if markers[blockID].copied {
+				level.Debug(logger).Log("msg", "skipping block because it has been copied already")
 				return nil
 			}
 
-			if markers[blockID].copied {
-				level.Debug(logger).Log("msg", "skipping block because it has been copied already")
+			if markers[blockID].deletion {
+				level.Debug(logger).Log("msg", "skipping block because it's marked for deletion")
 				return nil
 			}
 
