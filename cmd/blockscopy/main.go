@@ -168,7 +168,7 @@ func copyBlocks(ctx context.Context, cfg config, logger log.Logger) error {
 			}
 
 			if cfg.minBlockDuration > 0 {
-				meta, err := loadMetaJsonFile(ctx, sourceBucket, tenantID, blockID)
+				meta, err := loadMetaJSONFile(ctx, sourceBucket, tenantID, blockID)
 				if err != nil {
 					level.Error(logger).Log("msg", "skipping block, failed to read meta.json file", "err", err)
 					return err
@@ -259,7 +259,7 @@ func uploadCopiedMarkerFile(ctx context.Context, bkt *storage.BucketHandle, tena
 	return errors.Wrap(w.Close(), "uploadCopiedMarkerFile")
 }
 
-func loadMetaJsonFile(ctx context.Context, bkt *storage.BucketHandle, tenantID string, blockID ulid.ULID) (metadata.Meta, error) {
+func loadMetaJSONFile(ctx context.Context, bkt *storage.BucketHandle, tenantID string, blockID ulid.ULID) (metadata.Meta, error) {
 	obj := bkt.Object(tenantID + delim + blockID.String() + delim + block.MetaFilename)
 	r, err := obj.NewReader(ctx)
 	if err != nil {
@@ -345,9 +345,7 @@ func listBlockMarkersForTenant(ctx context.Context, bkt *storage.BucketHandle, t
 
 func trimDelimSuffix(items []string) {
 	for ix := range items {
-		if strings.HasSuffix(items[ix], delim) {
-			items[ix] = strings.TrimSuffix(items[ix], delim)
-		}
+		items[ix] = strings.TrimSuffix(items[ix], delim)
 	}
 }
 
