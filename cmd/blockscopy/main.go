@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,6 +21,9 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"google.golang.org/api/iterator"
@@ -35,9 +39,11 @@ type config struct {
 	minBlockDuration  time.Duration
 	tenantConcurrency int
 	blocksConcurrency int
-	period            time.Duration
+	copyPeriod        time.Duration
 	enabledUsers      flagext.StringSliceCSV
 	disabledUsers     flagext.StringSliceCSV
+
+	httpListen string
 }
 
 func (c *config) RegisterFlags(f *flag.FlagSet) {
@@ -46,10 +52,38 @@ func (c *config) RegisterFlags(f *flag.FlagSet) {
 	f.DurationVar(&c.minBlockDuration, "min-block-duration", 24*time.Hour, "If non-zero, ignore blocks that cover block range smaller than this")
 	f.IntVar(&c.tenantConcurrency, "tenant-concurrency", 5, "How many tenants to process at once.")
 	f.IntVar(&c.blocksConcurrency, "block-concurrency", 5, "How many blocks to copy at once per tenant.")
-	f.DurationVar(&c.period, "copy-period", 0, "How often to repeat the copy. If set to 0, copy is done once, and program stops. Otherwise program keeps running and copying blocks until terminated.")
+	f.DurationVar(&c.copyPeriod, "copy-period", 0, "How often to repeat the copy. If set to 0, copy is done once, and program stops. Otherwise program keeps running and copying blocks until terminated.")
 	f.Var(&c.enabledUsers, "enabled-users", "If not empty, only blocks for these users are copied.")
 	f.Var(&c.disabledUsers, "disabled-users", "If not empty, blocks for these users are not copied.")
+	f.StringVar(&c.httpListen, "http-listen-address", ":8080", "HTTP listen address")
+}
 
+type metrics struct {
+	copyCyclesSucceeded prometheus.Counter
+	copyCyclesFailed    prometheus.Counter
+	blocksCopied        prometheus.Counter
+	blocksCopyFailed    prometheus.Counter
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	return &metrics{
+		copyCyclesSucceeded: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "cortex_blocks_copy_successful_cycles_total",
+			Help: "Number of successful blocks copy cycles.",
+		}),
+		copyCyclesFailed: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "cortex_blocks_copy_failed_cycles_total",
+			Help: "Number of failed blocks copy cycles.",
+		}),
+		blocksCopied: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "cortex_blocks_copy_blocks_copied_total",
+			Help: "Number of blocks copied between buckets.",
+		}),
+		blocksCopyFailed: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "cortex_blocks_copy_blocks_failed_total",
+			Help: "Number of blocks that failed to copy.",
+		}),
+	}
 }
 
 func main() {
@@ -69,38 +103,52 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	success := runCopy(ctx, cfg, logger)
-	if cfg.period <= 0 {
+	m := newMetrics(prometheus.DefaultRegisterer)
+
+	go func() {
+		level.Info(logger).Log("msg", "HTTP server listening on "+cfg.httpListen)
+		http.Handle("/metrics", promhttp.Handler())
+		err := http.ListenAndServe(cfg.httpListen, nil)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to start HTTP server")
+			os.Exit(1)
+		}
+	}()
+
+	success := runCopy(ctx, cfg, logger, m)
+	if cfg.copyPeriod <= 0 {
 		if success {
 			os.Exit(0)
 		}
 		os.Exit(1)
 	}
 
-	t := time.NewTicker(cfg.period)
+	t := time.NewTicker(cfg.copyPeriod)
 	defer t.Stop()
 
 	for ctx.Err() == nil {
 		select {
 		case <-t.C:
-			_ = runCopy(ctx, cfg, logger)
+			_ = runCopy(ctx, cfg, logger, m)
 		case <-ctx.Done():
 		}
 	}
 }
 
-func runCopy(ctx context.Context, cfg config, logger log.Logger) bool {
-	err := copyBlocks(ctx, cfg, logger)
+func runCopy(ctx context.Context, cfg config, logger log.Logger, m *metrics) bool {
+	err := copyBlocks(ctx, cfg, logger, m)
 	if err != nil {
+		m.copyCyclesFailed.Inc()
 		level.Error(logger).Log("msg", "failed to copy blocks", "err", err)
 		return false
 	}
 
+	m.copyCyclesSucceeded.Inc()
 	level.Info(logger).Log("msg", "finished copying blocks")
 	return true
 }
 
-func copyBlocks(ctx context.Context, cfg config, logger log.Logger) error {
+func copyBlocks(ctx context.Context, cfg config, logger log.Logger, m *metrics) error {
 	enabledUsers := map[string]struct{}{}
 	disabledUsers := map[string]struct{}{}
 
@@ -163,7 +211,7 @@ func copyBlocks(ctx context.Context, cfg config, logger log.Logger) error {
 			}
 
 			if markers[blockID].deletion {
-				level.Debug(logger).Log("msg", "skipping block because it's marked for deletion")
+				level.Debug(logger).Log("msg", "skipping block because it is marked for deletion")
 				return nil
 			}
 
@@ -185,10 +233,12 @@ func copyBlocks(ctx context.Context, cfg config, logger log.Logger) error {
 
 			err = copySingleBlock(ctx, tenantID, blockID, sourceBucket, destBucket)
 			if err != nil {
+				m.blocksCopyFailed.Inc()
 				level.Error(logger).Log("msg", "failed to copy block", "err", err)
 				return err
 			}
 
+			m.blocksCopied.Inc()
 			level.Info(logger).Log("msg", "block copied successfully")
 
 			err = uploadCopiedMarkerFile(ctx, sourceBucket, tenantID, blockID, cfg.destBucket)
