@@ -462,7 +462,7 @@ func IsCopiedToBucketMarkFilename(name string) (bool, ulid.ULID, string) {
 		return false, ulid.ULID{}, ""
 	}
 
-	// Ensure the 2nd part matches the block deletion mark filename.
+	// Ensure the 2nd part matches the block copy mark filename.
 	if parts[1] != CopiedMarkFilename {
 		return false, ulid.ULID{}, ""
 	}
