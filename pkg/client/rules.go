@@ -28,7 +28,7 @@ func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg
 		return err
 	}
 
-	defer res.Body.Close()
+	res.Body.Close()
 
 	return nil
 }
@@ -44,7 +44,7 @@ func (r *CortexClient) DeleteRuleGroup(ctx context.Context, namespace, groupName
 		return err
 	}
 
-	defer res.Body.Close()
+	res.Body.Close()
 
 	return nil
 }

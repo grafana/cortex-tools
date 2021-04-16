@@ -31,7 +31,7 @@ func (r *CortexClient) CreateAlertmanagerConfig(ctx context.Context, cfg string,
 		return err
 	}
 
-	defer res.Body.Close()
+	res.Body.Close()
 
 	return nil
 }
@@ -43,7 +43,7 @@ func (r *CortexClient) DeleteAlermanagerConfig(ctx context.Context) error {
 		return err
 	}
 
-	defer res.Body.Close()
+	res.Body.Close()
 
 	return nil
 }
