@@ -204,7 +204,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 		"edits the rule file in place",
 	).Short('i').BoolVar(&r.InPlaceEdit)
 	prepareCmd.Flag("label", "label to include as part of the aggregations.").Default(defaultPrepareAggregationLabel).Short('l').StringVar(&r.AggregationLabel)
-	prepareCmd.Flag("label-excluded-rule-groups", "Comma separated list of rule group names to exclude when injecting the configured label to aggregations.").StringVar(&r.AggregationLabelExcludedRuleGroups)
+	prepareCmd.Flag("label-excluded-rule-groups", "Comma separated list of rule group names to exclude when including the configured label to aggregations.").StringVar(&r.AggregationLabelExcludedRuleGroups)
 
 	// Lint Command
 	lintCmd.Arg("rule-files", "The rule files to check.").ExistingFilesVar(&r.RuleFilesList)
