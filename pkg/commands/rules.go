@@ -67,8 +67,10 @@ type RuleCommand struct {
 	ignoredNamespacesMap map[string]struct{}
 
 	// Prepare Rules Config
-	InPlaceEdit      bool
-	AggregationLabel string
+	InPlaceEdit                            bool
+	AggregationLabel                       string
+	AggregationLabelExcludedRuleGroups     string
+	AggregationLabelExcludedRuleGroupsList []string
 
 	// Lint Rules Config
 	LintDryRun bool
@@ -202,6 +204,7 @@ func (r *RuleCommand) Register(app *kingpin.Application) {
 		"edits the rule file in place",
 	).Short('i').BoolVar(&r.InPlaceEdit)
 	prepareCmd.Flag("label", "label to include as part of the aggregations.").Default(defaultPrepareAggregationLabel).Short('l').StringVar(&r.AggregationLabel)
+	prepareCmd.Flag("label-excluded-rule-groups", "Comma separated list of rule group names to exclude when injecting the configured label to aggregations.").StringVar(&r.AggregationLabelExcludedRuleGroups)
 
 	// Lint Command
 	lintCmd.Arg("rule-files", "The rule files to check.").ExistingFilesVar(&r.RuleFilesList)
@@ -311,6 +314,17 @@ func (r *RuleCommand) setupFiles() error {
 	}
 
 	return nil
+}
+
+func (r *RuleCommand) setupAggregationLabel() {
+	// Ensure we reset it to start clean.
+	r.AggregationLabelExcludedRuleGroupsList = nil
+
+	for _, name := range strings.Split(r.AggregationLabelExcludedRuleGroups, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			r.AggregationLabelExcludedRuleGroupsList = append(r.AggregationLabelExcludedRuleGroupsList, name)
+		}
+	}
 }
 
 func (r *RuleCommand) listRules(k *kingpin.ParseContext) error {
@@ -608,14 +622,27 @@ func (r *RuleCommand) prepare(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "prepare operation unsuccessful, unable to load rules files")
 	}
 
+	r.setupAggregationLabel()
+
 	namespaces, err := rules.ParseFiles(r.Backend, r.RuleFilesList)
 	if err != nil {
 		return errors.Wrap(err, "prepare operation unsuccessful, unable to parse rules files")
 	}
 
+	// Do not apply the aggregation label to excluded rule groups.
+	applyTo := func(group rwrulefmt.RuleGroup, rule rulefmt.RuleNode) bool {
+		for _, name := range r.AggregationLabelExcludedRuleGroupsList {
+			if group.Name == name {
+				return false
+			}
+		}
+
+		return true
+	}
+
 	var count, mod int
 	for _, ruleNamespace := range namespaces {
-		c, m, err := ruleNamespace.AggregateBy(r.AggregationLabel)
+		c, m, err := ruleNamespace.AggregateBy(r.AggregationLabel, applyTo)
 		if err != nil {
 			return err
 		}
