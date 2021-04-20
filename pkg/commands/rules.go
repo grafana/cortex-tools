@@ -70,7 +70,7 @@ type RuleCommand struct {
 	InPlaceEdit                            bool
 	AggregationLabel                       string
 	AggregationLabelExcludedRuleGroups     string
-	AggregationLabelExcludedRuleGroupsList []string
+	aggregationLabelExcludedRuleGroupsList []string
 
 	// Lint Rules Config
 	LintDryRun bool
@@ -274,6 +274,13 @@ func (r *RuleCommand) setupFiles() error {
 		}
 	}
 
+	// Set up rule groups excluded from label aggregation.
+	for _, name := range strings.Split(r.AggregationLabelExcludedRuleGroups, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			r.aggregationLabelExcludedRuleGroupsList = append(r.aggregationLabelExcludedRuleGroupsList, name)
+		}
+	}
+
 	for _, file := range strings.Split(r.RuleFiles, ",") {
 		if file != "" {
 			log.WithFields(log.Fields{
@@ -314,17 +321,6 @@ func (r *RuleCommand) setupFiles() error {
 	}
 
 	return nil
-}
-
-func (r *RuleCommand) setupAggregationLabel() {
-	// Ensure we reset it to start clean.
-	r.AggregationLabelExcludedRuleGroupsList = nil
-
-	for _, name := range strings.Split(r.AggregationLabelExcludedRuleGroups, ",") {
-		if name = strings.TrimSpace(name); name != "" {
-			r.AggregationLabelExcludedRuleGroupsList = append(r.AggregationLabelExcludedRuleGroupsList, name)
-		}
-	}
 }
 
 func (r *RuleCommand) listRules(k *kingpin.ParseContext) error {
@@ -622,8 +618,6 @@ func (r *RuleCommand) prepare(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "prepare operation unsuccessful, unable to load rules files")
 	}
 
-	r.setupAggregationLabel()
-
 	namespaces, err := rules.ParseFiles(r.Backend, r.RuleFilesList)
 	if err != nil {
 		return errors.Wrap(err, "prepare operation unsuccessful, unable to parse rules files")
@@ -631,7 +625,7 @@ func (r *RuleCommand) prepare(k *kingpin.ParseContext) error {
 
 	// Do not apply the aggregation label to excluded rule groups.
 	applyTo := func(group rwrulefmt.RuleGroup, rule rulefmt.RuleNode) bool {
-		for _, name := range r.AggregationLabelExcludedRuleGroupsList {
+		for _, name := range r.aggregationLabelExcludedRuleGroupsList {
 			if group.Name == name {
 				return false
 			}
