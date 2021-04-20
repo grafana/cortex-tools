@@ -70,7 +70,7 @@ type RuleCommand struct {
 	InPlaceEdit                            bool
 	AggregationLabel                       string
 	AggregationLabelExcludedRuleGroups     string
-	aggregationLabelExcludedRuleGroupsList []string
+	aggregationLabelExcludedRuleGroupsList map[string]struct{}
 
 	// Lint Rules Config
 	LintDryRun bool
@@ -275,9 +275,10 @@ func (r *RuleCommand) setupFiles() error {
 	}
 
 	// Set up rule groups excluded from label aggregation.
+	r.aggregationLabelExcludedRuleGroupsList = map[string]struct{}{}
 	for _, name := range strings.Split(r.AggregationLabelExcludedRuleGroups, ",") {
 		if name = strings.TrimSpace(name); name != "" {
-			r.aggregationLabelExcludedRuleGroupsList = append(r.aggregationLabelExcludedRuleGroupsList, name)
+			r.aggregationLabelExcludedRuleGroupsList[name] = struct{}{}
 		}
 	}
 
@@ -625,13 +626,8 @@ func (r *RuleCommand) prepare(k *kingpin.ParseContext) error {
 
 	// Do not apply the aggregation label to excluded rule groups.
 	applyTo := func(group rwrulefmt.RuleGroup, rule rulefmt.RuleNode) bool {
-		for _, name := range r.aggregationLabelExcludedRuleGroupsList {
-			if group.Name == name {
-				return false
-			}
-		}
-
-		return true
+		_, excluded := r.aggregationLabelExcludedRuleGroupsList[group.Name]
+		return !excluded
 	}
 
 	var count, mod int
