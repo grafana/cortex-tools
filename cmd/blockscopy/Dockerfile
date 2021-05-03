@@ -3,7 +3,7 @@ ARG GOARCH="amd64"
 COPY . /build_dir
 WORKDIR /build_dir
 ENV GOPROXY=https://proxy.golang.org
-RUN make clean && make chunktool
+RUN make clean && make blockscopy
 
 FROM       alpine:3.13
 RUN        apk add --update --no-cache ca-certificates
