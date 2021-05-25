@@ -1,0 +1,19 @@
+queries:
+  - expr_template: sum(<<.Name>>{<<.Matchers>>})
+    interval: 1m
+    time_range: 1h
+    num_queries: 500
+    series_type: gauge-random
+replicas: 100
+series:
+  - labels:
+      - name: label_01
+        unique_values: 100
+        value_prefix: label_value_01
+    name: metric_gauge_random_5
+    static_labels:
+      static: "true"
+    type: gauge-random
+write_options:
+  batch_size: 10000
+  interval: 10s

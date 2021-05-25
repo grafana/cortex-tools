@@ -92,7 +92,7 @@ func NewWriteBenchmarkRunner(id string, tenantName string, cfg WriteBenchConfig,
 	return writeBench, nil
 }
 
-func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
+func (w *WriteBenchmarkRunner) getRandomWriteClient(tenantId string) (*writeClient, error) {
 	w.remoteMtx.Lock()
 	defer w.remoteMtx.Unlock()
 
@@ -105,18 +105,18 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 	var cli *writeClient
 	var exists bool
 
-	if cli, exists = w.clientPool[pick]; !exists {
+	if cli, exists = w.clientPool[tenantId]; !exists {
 		u, err := url.Parse("http://" + pick + "/api/v1/push")
 		if err != nil {
 			return nil, err
 		}
-		cli, err = newWriteClient("bench-"+pick, w.tenantName, &remote.ClientConfig{
+		cli, err = newWriteClient("bench-"+pick, tenantId, &remote.ClientConfig{
 			URL:     &config.URL{URL: u},
 			Timeout: model.Duration(w.workload.options.Timeout),
 
 			HTTPClientConfig: config.HTTPClientConfig{
 				BasicAuth: &config.BasicAuth{
-					Username: w.cfg.BasicAuthUsername,
+					Username: tenantId,
 					Password: config.Secret(w.cfg.BasicAuthPasword),
 				},
 			},
@@ -124,7 +124,7 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 		if err != nil {
 			return nil, err
 		}
-		w.clientPool[pick] = cli
+		w.clientPool[tenantId] = cli
 	}
 
 	return cli, nil
@@ -162,25 +162,27 @@ func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
 
 func (w *WriteBenchmarkRunner) sendBatch(ctx context.Context, batch []prompb.TimeSeries) error {
 	level.Debug(w.logger).Log("msg", "sending timeseries batch", "num_series", strconv.Itoa(len(batch)))
-	cli, err := w.getRandomWriteClient()
-	if err != nil {
-		return errors.Wrap(err, "unable to get remote-write client")
-	}
-	req := prompb.WriteRequest{
-		Timeseries: batch,
-	}
 
-	data, err := proto.Marshal(&req)
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal remote-write request")
-	}
+	for i := 100; i < 200; i++ {
+		tenantId := strconv.Itoa(i)
+		cli, err := w.getRandomWriteClient(tenantId)
+		if err != nil {
+			return errors.Wrap(err, "unable to get remote-write client")
+		}
+		req := prompb.WriteRequest{
+			Timeseries: batch,
+		}
 
-	compressed := snappy.Encode(nil, data)
+		data, err := proto.Marshal(&req)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal remote-write request")
+		}
 
-	err = cli.Store(ctx, compressed)
-
-	if err != nil {
-		return errors.Wrap(err, "remote-write request failed")
+		compressed := snappy.Encode(nil, data)
+		err = cli.Store(ctx, compressed, tenantId)
+		if err != nil {
+			return errors.Wrap(err, "remote-write request failed")
+		}
 	}
 
 	return nil

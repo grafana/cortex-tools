@@ -63,7 +63,7 @@ func newWriteClient(name string, tenantName string, conf *remote.ClientConfig, l
 
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshalled
 // and encoded bytes from codec.go.
-func (c *writeClient) Store(ctx context.Context, req []byte) error {
+func (c *writeClient) Store(ctx context.Context, req []byte, tenantId string) error {
 	spanLog, ctx := spanlogger.New(ctx, "writeClient.Store")
 	defer spanLog.Span.Finish()
 	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(req))
@@ -76,9 +76,7 @@ func (c *writeClient) Store(ctx context.Context, req []byte) error {
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", UserAgent)
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
-	if c.tenantName != "" {
-		httpReq.Header.Set("X-Scope-OrgID", c.tenantName)
-	}
+	httpReq.Header.Set("X-Scope-OrgID", tenantId)
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 

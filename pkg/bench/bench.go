@@ -30,7 +30,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	}
 	f.StringVar(&cfg.ID, "bench.id", defaultID, "ID of worker. Defaults to hostname")
 	f.StringVar(&cfg.InstanceName, "bench.instance-name", "default", "Instance name writes and queries will be run against.")
-	f.StringVar(&cfg.WorkloadFilePath, "bench.workload-file-path", "./workload.yaml", "path to the file containing the workload description")
+	f.StringVar(&cfg.WorkloadFilePath, "bench.workload-file-path", "/Users/vdiachenko/projects/cortex-tools/cmd/benchtool/workload.yml", "path to the file containing the workload description")
 
 	cfg.Write.RegisterFlags(f)
 	cfg.Query.RegisterFlags(f)
