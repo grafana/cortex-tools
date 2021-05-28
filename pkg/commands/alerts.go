@@ -143,7 +143,7 @@ func (a *AlertCommand) Register(app *kingpin.Application) {
 	alertCmd.Flag("address", "Address of the cortex cluster, alternatively set CORTEX_ADDRESS.").Envar("CORTEX_ADDRESS").Required().StringVar(&a.ClientConfig.Address)
 	alertCmd.Flag("id", "Cortex tenant id, alternatively set CORTEX_TENANT_ID.").Envar("CORTEX_TENANT_ID").Required().StringVar(&a.ClientConfig.ID)
 	alertCmd.Flag("user", "API user to use when contacting cortex, alternatively set CORTEX_API_USER. If empty, CORTEX_TENANT_ID will be used instead.").Default("").Envar("CORTEX_API_USER").StringVar(&a.ClientConfig.User)
-	alertCmd.Flag("key", "Api key to use when contacting cortex, alternatively set CORTEX_API_KEY.").Default("").Envar("CORTEX_API_KEY").StringVar(&a.ClientConfig.Key)
+	alertCmd.Flag("key", "API key to use when contacting cortex, alternatively set CORTEX_API_KEY.").Default("").Envar("CORTEX_API_KEY").StringVar(&a.ClientConfig.Key)
 
 	verifyAlertsCmd := alertCmd.Command("verify", "Verifies alerts in an alertmanager cluster are deduplicated; useful for verifying correct configuration when transferring from Prometheus to Cortex alert evaluation.").Action(a.verifyConfig)
 	verifyAlertsCmd.Flag("ignore-alerts", "A comma separated list of Alert names to ignore in deduplication checks.").StringVar(&a.IgnoreString)
