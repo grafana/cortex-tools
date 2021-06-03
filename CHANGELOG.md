@@ -4,6 +4,7 @@ Order should be `CHANGE`, `FEATURE`, `ENHANCEMENT`, and `BUGFIX`
 
 ## unreleased/master
 
+* [BUGFIX] Benchtool: avoid duplicate DNS metrics registration. #188
 * [ENHANCEMENT] Added the ability to set an explicit user when Cortex is behind basic auth. #187
 
 ## v0.10.1
