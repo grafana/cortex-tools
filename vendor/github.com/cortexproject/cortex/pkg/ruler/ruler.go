@@ -50,7 +50,8 @@ var (
 
 const (
 	// Number of concurrent group list and group loads operations.
-	loadRulesConcurrency = 10
+	loadRulesConcurrency  = 10
+	fetchRulesConcurrency = 16
 
 	rulerSyncReasonInitial    = "initial"
 	rulerSyncReasonPeriodic   = "periodic"
@@ -59,6 +60,9 @@ const (
 	// Limit errors
 	errMaxRuleGroupsPerUserLimitExceeded        = "per-user rule groups limit (limit: %d actual: %d) exceeded"
 	errMaxRulesPerRuleGroupPerUserLimitExceeded = "per-user rules per rule group limit (limit: %d actual: %d) exceeded"
+
+	// errors
+	errListAllUser = "unable to list the ruler users"
 )
 
 // Config is the configuration for the recording rules server.
@@ -72,7 +76,7 @@ type Config struct {
 	// How frequently to poll for updated rules.
 	PollInterval time.Duration `yaml:"poll_interval"`
 	// Rule Storage and Polling configuration.
-	StoreConfig RuleStoreConfig `yaml:"storage"`
+	StoreConfig RuleStoreConfig `yaml:"storage" doc:"description=Deprecated. Use -ruler-storage.* CLI flags and their respective YAML config options instead."`
 	// Path to store rule files for prom manager.
 	RulePath string `yaml:"rule_path"`
 
@@ -106,6 +110,9 @@ type Config struct {
 	FlushCheckPeriod time.Duration `yaml:"flush_period"`
 
 	EnableAPI bool `yaml:"enable_api"`
+
+	EnabledTenants  flagext.StringSliceCSV `yaml:"enabled_tenants"`
+	DisabledTenants flagext.StringSliceCSV `yaml:"disabled_tenants"`
 
 	RingCheckPeriod time.Duration `yaml:"-"`
 }
@@ -163,6 +170,9 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.DurationVar(&cfg.ForGracePeriod, "ruler.for-grace-period", 10*time.Minute, `Minimum duration between alert and restored "for" state. This is maintained only for alerts with configured "for" time greater than grace period.`)
 	f.DurationVar(&cfg.ResendDelay, "ruler.resend-delay", time.Minute, `Minimum amount of time to wait before resending an alert to Alertmanager.`)
 
+	f.Var(&cfg.EnabledTenants, "ruler.enabled-tenants", "Comma separated list of tenants whose rules this ruler can evaluate. If specified, only these tenants will be handled by ruler, otherwise this ruler can process rules from all tenants. Subject to sharding.")
+	f.Var(&cfg.DisabledTenants, "ruler.disabled-tenants", "Comma separated list of tenants whose rules this ruler cannot evaluate. If specified, a ruler that would normally pick the specified tenant(s) for processing will ignore them instead. Subject to sharding.")
+
 	cfg.RingCheckPeriod = 5 * time.Second
 }
 
@@ -170,7 +180,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 type MultiTenantManager interface {
 	// SyncRuleGroups is used to sync the Manager with rules from the RuleStore.
 	// If existing user is missing in the ruleGroups map, its ruler manager will be stopped.
-	SyncRuleGroups(ctx context.Context, ruleGroups map[string]rulestore.RuleGroupList)
+	SyncRuleGroups(ctx context.Context, ruleGroups map[string]rulespb.RuleGroupList)
 	// GetRules fetches rules for a particular tenant (userID).
 	GetRules(userID string) []*promRules.Group
 	// Stop stops all Manager components.
@@ -224,6 +234,8 @@ type Ruler struct {
 	ringCheckErrors prometheus.Counter
 	rulerSync       *prometheus.CounterVec
 
+	allowedTenants *util.AllowedTenants
+
 	registry prometheus.Registerer
 	logger   log.Logger
 }
@@ -231,13 +243,14 @@ type Ruler struct {
 // NewRuler creates a new ruler from a distributor and chunk store.
 func NewRuler(cfg Config, manager MultiTenantManager, reg prometheus.Registerer, logger log.Logger, ruleStore rulestore.RuleStore, limits RulesLimits) (*Ruler, error) {
 	ruler := &Ruler{
-		cfg:         cfg,
-		store:       ruleStore,
-		manager:     manager,
-		registry:    reg,
-		logger:      logger,
-		limits:      limits,
-		clientsPool: newRulerClientPool(cfg.ClientTLSConfig, logger, reg),
+		cfg:            cfg,
+		store:          ruleStore,
+		manager:        manager,
+		registry:       reg,
+		logger:         logger,
+		limits:         limits,
+		clientsPool:    newRulerClientPool(cfg.ClientTLSConfig, logger, reg),
+		allowedTenants: util.NewAllowedTenants(cfg.EnabledTenants, cfg.DisabledTenants),
 
 		ringCheckErrors: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "cortex_ruler_ring_check_errors_total",
@@ -248,6 +261,13 @@ func NewRuler(cfg Config, manager MultiTenantManager, reg prometheus.Registerer,
 			Name: "cortex_ruler_sync_rules_total",
 			Help: "Total number of times the ruler sync operation triggered.",
 		}, []string{"reason"}),
+	}
+
+	if len(cfg.EnabledTenants) > 0 {
+		level.Info(ruler.logger).Log("msg", "ruler using enabled users", "enabled", strings.Join(cfg.EnabledTenants, ", "))
+	}
+	if len(cfg.DisabledTenants) > 0 {
+		level.Info(ruler.logger).Log("msg", "ruler using disabled users", "disabled", strings.Join(cfg.DisabledTenants, ", "))
 	}
 
 	if cfg.EnableSharding {
@@ -331,19 +351,19 @@ func (r *Ruler) stopping(_ error) error {
 	return nil
 }
 
+type sender interface {
+	Send(alerts ...*notifier.Alert)
+}
+
 // SendAlerts implements a rules.NotifyFunc for a Notifier.
 // It filters any non-firing alerts from the input.
 //
 // Copied from Prometheus's main.go.
-func SendAlerts(n *notifier.Manager, externalURL string) promRules.NotifyFunc {
+func SendAlerts(n sender, externalURL string) promRules.NotifyFunc {
 	return func(ctx context.Context, expr string, alerts ...*promRules.Alert) {
 		var res []*notifier.Alert
 
 		for _, alert := range alerts {
-			// Only send actually firing alerts.
-			if alert.State == promRules.StatePending {
-				continue
-			}
 			a := &notifier.Alert{
 				StartsAt:     alert.FiredAt,
 				Labels:       alert.Labels,
@@ -352,6 +372,8 @@ func SendAlerts(n *notifier.Manager, externalURL string) promRules.NotifyFunc {
 			}
 			if !alert.ResolvedAt.IsZero() {
 				a.EndsAt = alert.ResolvedAt
+			} else {
+				a.EndsAt = alert.ValidUntil
 			}
 			res = append(res, a)
 		}
@@ -385,7 +407,7 @@ func instanceOwnsRuleGroup(r ring.ReadRing, g *rulespb.RuleGroupDesc, instanceAd
 		return false, errors.Wrap(err, "error reading ring to verify rule group ownership")
 	}
 
-	return rlrs.Ingesters[0].Addr == instanceAddr, nil
+	return rlrs.Instances[0].Addr == instanceAddr, nil
 }
 
 func (r *Ruler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -404,11 +426,7 @@ func (r *Ruler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 					<p>Ruler running with shards disabled</p>
 				</body>
 			</html>`
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(unshardedPage))
-		if err != nil {
-			level.Error(r.logger).Log("msg", "unable to serve status page", "err", err)
-		}
+		util.WriteHTMLResponse(w, unshardedPage)
 	}
 }
 
@@ -470,33 +488,45 @@ func (r *Ruler) syncRules(ctx context.Context, reason string) {
 	r.manager.SyncRuleGroups(ctx, configs)
 }
 
-func (r *Ruler) listRules(ctx context.Context) (map[string]rulestore.RuleGroupList, error) {
+func (r *Ruler) listRules(ctx context.Context) (result map[string]rulespb.RuleGroupList, err error) {
 	switch {
 	case !r.cfg.EnableSharding:
-		return r.listRulesNoSharding(ctx)
+		result, err = r.listRulesNoSharding(ctx)
 
 	case r.cfg.ShardingStrategy == util.ShardingStrategyDefault:
-		return r.listRulesShardingDefault(ctx)
+		result, err = r.listRulesShardingDefault(ctx)
 
 	case r.cfg.ShardingStrategy == util.ShardingStrategyShuffle:
-		return r.listRulesShuffleSharding(ctx)
+		result, err = r.listRulesShuffleSharding(ctx)
 
 	default:
 		return nil, errors.New("invalid sharding configuration")
 	}
+
+	if err != nil {
+		return
+	}
+
+	for userID := range result {
+		if !r.allowedTenants.IsAllowed(userID) {
+			level.Debug(r.logger).Log("msg", "ignoring rule groups for user, not allowed", "user", userID)
+			delete(result, userID)
+		}
+	}
+	return
 }
 
-func (r *Ruler) listRulesNoSharding(ctx context.Context) (map[string]rulestore.RuleGroupList, error) {
+func (r *Ruler) listRulesNoSharding(ctx context.Context) (map[string]rulespb.RuleGroupList, error) {
 	return r.store.ListAllRuleGroups(ctx)
 }
 
-func (r *Ruler) listRulesShardingDefault(ctx context.Context) (map[string]rulestore.RuleGroupList, error) {
+func (r *Ruler) listRulesShardingDefault(ctx context.Context) (map[string]rulespb.RuleGroupList, error) {
 	configs, err := r.store.ListAllRuleGroups(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredConfigs := make(map[string]rulestore.RuleGroupList)
+	filteredConfigs := make(map[string]rulespb.RuleGroupList)
 	for userID, groups := range configs {
 		filtered := filterRuleGroups(userID, groups, r.ring, r.lifecycler.GetInstanceAddr(), r.logger, r.ringCheckErrors)
 		if len(filtered) > 0 {
@@ -506,7 +536,7 @@ func (r *Ruler) listRulesShardingDefault(ctx context.Context) (map[string]rulest
 	return filteredConfigs, nil
 }
 
-func (r *Ruler) listRulesShuffleSharding(ctx context.Context) (map[string]rulestore.RuleGroupList, error) {
+func (r *Ruler) listRulesShuffleSharding(ctx context.Context) (map[string]rulespb.RuleGroupList, error) {
 	users, err := r.store.ListAllUsers(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to list users of ruler")
@@ -540,7 +570,7 @@ func (r *Ruler) listRulesShuffleSharding(ctx context.Context) (map[string]rulest
 	close(userCh)
 
 	mu := sync.Mutex{}
-	result := map[string]rulestore.RuleGroupList{}
+	result := map[string]rulespb.RuleGroupList{}
 
 	concurrency := loadRulesConcurrency
 	if len(userRings) < concurrency {
@@ -768,7 +798,7 @@ func (r *Ruler) AssertMaxRuleGroups(userID string, rg int) error {
 		return nil
 	}
 
-	if rg < limit {
+	if rg <= limit {
 		return nil
 	}
 
@@ -784,7 +814,7 @@ func (r *Ruler) AssertMaxRulesPerRuleGroup(userID string, rules int) error {
 		return nil
 	}
 
-	if rules < limit {
+	if rules <= limit {
 		return nil
 	}
 	return fmt.Errorf(errMaxRulesPerRuleGroupPerUserLimitExceeded, limit, rules)
@@ -809,4 +839,47 @@ func (r *Ruler) DeleteTenantConfiguration(w http.ResponseWriter, req *http.Reque
 
 	level.Info(logger).Log("msg", "deleted all tenant rule groups", "user", userID)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (r *Ruler) ListAllRules(w http.ResponseWriter, req *http.Request) {
+	logger := util_log.WithContext(req.Context(), r.logger)
+
+	userIDs, err := r.store.ListAllUsers(req.Context())
+	if err != nil {
+		level.Error(logger).Log("msg", errListAllUser, "err", err)
+		http.Error(w, fmt.Sprintf("%s: %s", errListAllUser, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	done := make(chan struct{})
+	iter := make(chan interface{})
+
+	go func() {
+		util.StreamWriteYAMLResponse(w, iter, logger)
+		close(done)
+	}()
+
+	err = concurrency.ForEachUser(req.Context(), userIDs, fetchRulesConcurrency, func(ctx context.Context, userID string) error {
+		rg, err := r.store.ListRuleGroupsForUserAndNamespace(ctx, userID, "")
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch ruler config for user %s", userID)
+		}
+		userRules := map[string]rulespb.RuleGroupList{userID: rg}
+		if err := r.store.LoadRuleGroups(ctx, userRules); err != nil {
+			return errors.Wrapf(err, "failed to load ruler config for user %s", userID)
+		}
+		data := map[string]map[string][]rulefmt.RuleGroup{userID: userRules[userID].Formatted()}
+
+		select {
+		case iter <- data:
+		case <-done: // stop early, if sending response has already finished
+		}
+
+		return nil
+	})
+	if err != nil {
+		level.Error(logger).Log("msg", "failed to list all ruler configs", "err", err)
+	}
+	close(iter)
+	<-done
 }
