@@ -80,7 +80,7 @@ type WriteWorkload struct {
 	seriesBufferChan chan []prompb.TimeSeries
 }
 
-func NewWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *WriteWorkload {
+func newWriteWorkload(workloadDesc WorkloadDesc, reg prometheus.Registerer) *WriteWorkload {
 	series, totalSeriesTypeMap := SeriesDescToSeries(workloadDesc.Series)
 
 	totalSeries := 0
