@@ -139,15 +139,15 @@ func (w *WriteBenchmarkRunner) Run(ctx context.Context) error {
 	// This number will also be used for the number of series buffers to store at once.
 	numWorkers := w.workload.Replicas * 10
 
-	batchChan := make(chan BatchReq, 10)
+	batchChan := make(chan batchReq, 10)
 	for i := 0; i < numWorkers; i++ {
 		go w.writeWorker(batchChan)
 	}
 
-	return w.workload.GenerateWriteBatch(ctx, w.id, numWorkers+10, batchChan)
+	return w.workload.generateWriteBatch(ctx, w.id, numWorkers+10, batchChan)
 }
 
-func (w *WriteBenchmarkRunner) writeWorker(batchChan chan BatchReq) {
+func (w *WriteBenchmarkRunner) writeWorker(batchChan chan batchReq) {
 	for batchReq := range batchChan {
 		err := w.sendBatch(context.Background(), batchReq.batch)
 		if err != nil {

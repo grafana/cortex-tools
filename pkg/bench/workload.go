@@ -217,7 +217,7 @@ func (w *WriteWorkload) GenerateTimeSeries(id string, t time.Time) []prompb.Time
 	return timeseries
 }
 
-type BatchReq struct {
+type batchReq struct {
 	batch   []prompb.TimeSeries
 	wg      *sync.WaitGroup
 	putBack chan []prompb.TimeSeries
@@ -232,7 +232,7 @@ func (w *WriteWorkload) getSeriesBuffer(ctx context.Context) []prompb.TimeSeries
 	}
 }
 
-func (w *WriteWorkload) GenerateWriteBatch(ctx context.Context, id string, numBuffers int, seriesChan chan BatchReq) error {
+func (w *WriteWorkload) generateWriteBatch(ctx context.Context, id string, numBuffers int, seriesChan chan batchReq) error {
 	w.seriesBufferChan = make(chan []prompb.TimeSeries, numBuffers)
 	for i := 0; i < numBuffers; i++ {
 		w.seriesBufferChan <- make([]prompb.TimeSeries, 0, w.options.BatchSize)
@@ -279,7 +279,7 @@ func (w *WriteWorkload) GenerateWriteBatch(ctx context.Context, id string, numBu
 				for _, labelSet := range series.labelSets {
 					if len(seriesBuffer) == w.options.BatchSize {
 						wg.Add(1)
-						seriesChan <- BatchReq{seriesBuffer, wg, w.seriesBufferChan}
+						seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
 						seriesBuffer = w.getSeriesBuffer(ctx)
 					}
 					newLabelSet := make([]prompb.Label, len(labelSet)+2)
@@ -299,7 +299,7 @@ func (w *WriteWorkload) GenerateWriteBatch(ctx context.Context, id string, numBu
 		}
 		if len(seriesBuffer) > 0 {
 			wg.Add(1)
-			seriesChan <- BatchReq{seriesBuffer, wg, w.seriesBufferChan}
+			seriesChan <- batchReq{seriesBuffer, wg, w.seriesBufferChan}
 			seriesBuffer = w.getSeriesBuffer(ctx)
 		}
 		wg.Wait()
