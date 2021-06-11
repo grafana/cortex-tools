@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/grafana/cortex-tools/pkg/bench"
@@ -20,32 +19,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	tsdbChunksDir = "chunks"
-	indexFile     = "index"
-)
+// BlockGenCommand is the kingpin command to generate blocks of mock data.
+type BlockGenCommand struct {
+	Series     []bench.SeriesDesc `yaml:"series"`
+	Cfg        BlockGenConfig     `yaml:"block_gen"`
+	configFile string
+}
 
-// FakeMetricsCommand is the kingpin command for fake metric generation.
-type FakeMetricsCommand struct {
-	Series      []bench.SeriesDesc `yaml:"series"`
-	Interval    time.Duration      `yaml:"interval"`
-	BlockSize   time.Duration      `yaml:"block_size"`
-	Concurrency int                `yaml:"concurrency"`
-	TmpDir      string             `yaml:"tmp_dir"`
-	MinT        int64              `yaml:"min_t"`
-	MaxT        int64              `yaml:"max_t"`
-	Bucket      bucket.Config      `yaml:"bucket"`
-	configFile  string
-	logger      log.Logger
+type BlockGenConfig struct {
+	Interval  time.Duration `yaml:"interval"`
+	BlockSize time.Duration `yaml:"block_size"`
+	BlockDir  string        `yaml:"block_dir"`
+	MinT      int64         `yaml:"min_t"`
+	MaxT      int64         `yaml:"max_t"`
 }
 
 // Register is used to register the command to a parent command.
-func (f *FakeMetricsCommand) Register(app *kingpin.Application) {
-	bvCmd := app.Command("fake-metrics", "Generate fake metrics and upload them.").Action(f.fakemetrics)
-	bvCmd.Flag("config-file", "configuration file for this tool").Required().StringVar(&f.configFile)
+func (f *BlockGenCommand) Register(app *kingpin.Application) {
+	app.Flag("config.file", "configuration file for this tool").Required().StringVar(&f.configFile)
+	app.Action(f.run)
 }
 
-func (f *FakeMetricsCommand) fakemetrics(k *kingpin.ParseContext) error {
+func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
 
 	content, err := os.ReadFile(f.configFile)
@@ -58,15 +53,13 @@ func (f *FakeMetricsCommand) fakemetrics(k *kingpin.ParseContext) error {
 		return errors.Wrap(err, "unable to unmarshal workload YAML file")
 	}
 
-	if f.TmpDir == "" {
+	if f.Cfg.BlockDir == "" {
 		var err error
-		f.TmpDir, err = ioutil.TempDir("", "fakemetrics")
+		f.Cfg.BlockDir, err = ioutil.TempDir("", "mockdata")
 		if err != nil {
 			return errors.Wrap(err, "failed to create tmp dir")
 		}
 	}
-
-	level.Info(logger).Log("Using tmp dir: %s", f.TmpDir)
 
 	seriesSet, totalSeriesTypeMap := bench.SeriesDescToSeries(f.Series)
 	totalSeries := 0
@@ -81,36 +74,36 @@ func (f *FakeMetricsCommand) fakemetrics(k *kingpin.ParseContext) error {
 		Series:             seriesSet,
 	}
 
-	interval := f.Interval.Milliseconds()
-	blockSize := f.BlockSize.Milliseconds()
+	interval := f.Cfg.Interval.Milliseconds()
+	blockSize := f.Cfg.BlockSize.Milliseconds()
 
-	w, err := tsdb.NewBlockWriter(log.NewNopLogger(), f.TmpDir, blockSize)
-	if err != nil {
-		return err
-	}
+	level.Info(logger).Log("msg", "Generating data", "minT", f.Cfg.MinT, "maxT", f.Cfg.MaxT, "interval", interval)
+	currentTs := (int64(f.Cfg.MinT) + interval - 1) / interval * interval
 
 	ctx := context.Background()
+	currentBlockId := int64(-1)
+	lastBlockId := blockId(f.Cfg.MaxT, blockSize)
+	var w *tsdb.BlockWriter
+	for ; currentTs <= f.Cfg.MaxT; currentTs += interval {
+		if currentBlockId != blockId(currentTs, blockSize) {
+			if w != nil {
+				_, err = w.Flush(ctx)
+				if err != nil {
+					return err
+				}
+			}
 
-	level.Info(logger).Log("msg", "Generating data", "minT", f.MinT, "maxT", f.MaxT, "interval", interval)
-	currentTs := (int64(f.MinT) + interval - 1) / interval * interval
-	currentBlock := currentTs / blockSize
-	for ; currentTs <= f.MaxT; currentTs += interval {
-		if currentBlock != currentTs/blockSize {
-			_, err = w.Flush(ctx)
+			currentBlockId = blockId(currentTs, blockSize)
+			level.Info(logger).Log("msg", "starting new block", "block_id", currentBlockId, "blocks_left", lastBlockId-currentBlockId+1)
+			w, err = tsdb.NewBlockWriter(log.NewNopLogger(), f.Cfg.BlockDir, blockSize)
 			if err != nil {
 				return err
 			}
-
-			w, err = tsdb.NewBlockWriter(log.NewNopLogger(), f.TmpDir, blockSize)
-			if err != nil {
-				return err
-			}
-			currentBlock = currentTs / blockSize
 		}
+
+		timeSeries := writeWorkLoad.GenerateTimeSeries("block_gen", time.Unix(currentTs/1000, 0))
+
 		app := w.Appender(ctx)
-
-		timeSeries := writeWorkLoad.GenerateTimeSeries("test1", time.Unix(currentTs/1000, 0))
-
 		for _, s := range timeSeries {
 			var ref uint64
 			labels := prompbLabelsToLabelsLabels(s.Labels)
@@ -134,7 +127,14 @@ func (f *FakeMetricsCommand) fakemetrics(k *kingpin.ParseContext) error {
 	}
 
 	_, err = w.Flush(ctx)
+
+	level.Info(logger).Log("msg", "finished", "block_dir", f.Cfg.BlockDir)
+
 	return err
+}
+
+func blockId(ts, blockSize int64) int64 {
+	return ts / blockSize
 }
 
 func prompbLabelsToLabelsLabels(in []prompb.Label) labels.Labels {

@@ -8,15 +8,11 @@ import (
 	"github.com/grafana/cortex-tools/pkg/commands"
 )
 
-var (
-	logConfig          commands.LoggerConfig
-	fakeMetricsCommand commands.FakeMetricsCommand
-)
+var blockGenCommand commands.BlockGenCommand
 
 func main() {
 	kingpin.Version("0.0.1")
 	app := kingpin.New("blockgen", "A command-line tool to generate cortex blocks.")
-	logConfig.Register(app)
-	fakeMetricsCommand.Register(app)
+	blockGenCommand.Register(app)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 }
