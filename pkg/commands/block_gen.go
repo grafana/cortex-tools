@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -106,10 +105,10 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 		app := w.Appender(ctx)
 		for _, s := range timeSeries {
 			var ref uint64
-			labels := prompbLabelsToLabelsLabels(s.Labels)
 
+			labels := prompbLabelsToLabelsLabels(s.Labels)
 			sort.Slice(labels, func(i, j int) bool {
-				return strings.Compare(labels[i].Name, labels[j].Name) < 0
+				return labels[i].Name < labels[j].Name
 			})
 
 			for _, sample := range s.Samples {
