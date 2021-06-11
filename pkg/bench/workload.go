@@ -62,9 +62,9 @@ type WorkloadDesc struct {
 }
 
 type Timeseries struct {
-	LabelSets  [][]prompb.Label
-	LastValue  float64
-	SeriesType SeriesType
+	labelSets  [][]prompb.Label
+	lastValue  float64
+	seriesType SeriesType
 }
 
 type WriteWorkload struct {
@@ -148,8 +148,8 @@ func SeriesDescToSeries(seriesDescs []SeriesDesc) ([]*Timeseries, map[SeriesType
 		}
 
 		series = append(series, &Timeseries{
-			LabelSets:  labelSets,
-			SeriesType: seriesDesc.Type,
+			labelSets:  labelSets,
+			seriesType: seriesDesc.Type,
 		})
 		numSeries := len(labelSets)
 		totalSeriesTypeMap[seriesDesc.Type] += numSeries
@@ -184,20 +184,20 @@ func (w *WriteWorkload) GenerateTimeSeries(id string, t time.Time) []prompb.Time
 		idLabel := prompb.Label{Name: "bench_id", Value: id}
 		for _, series := range w.Series {
 			var value float64
-			switch series.SeriesType {
+			switch series.seriesType {
 			case GaugeZero:
 				value = 0
 			case GaugeRandom:
 				value = rand.Float64()
 			case CounterOne:
-				value = series.LastValue + 1
+				value = series.lastValue + 1
 			case CounterRandom:
-				value = series.LastValue + float64(rand.Int())
+				value = series.lastValue + float64(rand.Int())
 			default:
-				panic(fmt.Sprintf("unknown series type %v", series.SeriesType))
+				panic(fmt.Sprintf("unknown series type %v", series.seriesType))
 			}
-			series.LastValue = value
-			for _, labelSet := range series.LabelSets {
+			series.lastValue = value
+			for _, labelSet := range series.labelSets {
 				newLabelSet := make([]prompb.Label, len(labelSet)+2)
 				copy(newLabelSet, labelSet)
 
@@ -263,20 +263,20 @@ func (w *WriteWorkload) GenerateWriteBatch(ctx context.Context, id string, numBu
 			idLabel := prompb.Label{Name: "bench_id", Value: id}
 			for _, series := range w.Series {
 				var value float64
-				switch series.SeriesType {
+				switch series.seriesType {
 				case GaugeZero:
 					value = 0
 				case GaugeRandom:
 					value = rand.Float64()
 				case CounterOne:
-					value = series.LastValue + 1
+					value = series.lastValue + 1
 				case CounterRandom:
-					value = series.LastValue + float64(rand.Int())
+					value = series.lastValue + float64(rand.Int())
 				default:
-					return fmt.Errorf("unknown series type %v", series.SeriesType)
+					return fmt.Errorf("unknown series type %v", series.seriesType)
 				}
-				series.LastValue = value
-				for _, labelSet := range series.LabelSets {
+				series.lastValue = value
+				for _, labelSet := range series.labelSets {
 					if len(seriesBuffer) == w.options.BatchSize {
 						wg.Add(1)
 						seriesChan <- BatchReq{seriesBuffer, wg, w.seriesBufferChan}
