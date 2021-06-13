@@ -80,11 +80,11 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	currentTs := (int64(f.Cfg.MinT) + interval - 1) / interval * interval
 
 	ctx := context.Background()
-	currentBlockId := int64(-1)
-	lastBlockId := blockId(f.Cfg.MaxT, blockSize)
+	currentBlockID := int64(-1)
+	lastBlockID := blockID(f.Cfg.MaxT, blockSize)
 	var w *tsdb.BlockWriter
 	for ; currentTs <= f.Cfg.MaxT; currentTs += interval {
-		if currentBlockId != blockId(currentTs, blockSize) {
+		if currentBlockID != blockID(currentTs, blockSize) {
 			if w != nil {
 				_, err = w.Flush(ctx)
 				if err != nil {
@@ -92,8 +92,8 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 				}
 			}
 
-			currentBlockId = blockId(currentTs, blockSize)
-			level.Info(logger).Log("msg", "starting new block", "block_id", currentBlockId, "blocks_left", lastBlockId-currentBlockId+1)
+			currentBlockID = blockID(currentTs, blockSize)
+			level.Info(logger).Log("msg", "starting new block", "block_id", currentBlockID, "blocks_left", lastBlockID-currentBlockID+1)
 			w, err = tsdb.NewBlockWriter(log.NewNopLogger(), f.Cfg.BlockDir, blockSize)
 			if err != nil {
 				return err
@@ -132,7 +132,7 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	return err
 }
 
-func blockId(ts, blockSize int64) int64 {
+func blockID(ts, blockSize int64) int64 {
 	return ts / blockSize
 }
 
