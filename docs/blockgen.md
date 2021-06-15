@@ -14,6 +14,7 @@ It uses the same syntax to define what metrics should be generated like the
 This is an example config file:
 
 ```yaml
+replicas: 3
 block_gen:
   interval: 15s
   block_size: 2h

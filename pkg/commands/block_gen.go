@@ -20,6 +20,7 @@ import (
 
 // BlockGenCommand is the kingpin command to generate blocks of mock data.
 type BlockGenCommand struct {
+	Replicas   int                `yaml:"replicas"`
 	Series     []bench.SeriesDesc `yaml:"series"`
 	Cfg        BlockGenConfig     `yaml:"block_gen"`
 	configFile string
@@ -69,7 +70,7 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	writeWorkLoad := bench.WriteWorkload{
 		TotalSeries:        totalSeries,
 		TotalSeriesTypeMap: totalSeriesTypeMap,
-		Replicas:           1,
+		Replicas:           f.Replicas,
 		Series:             seriesSet,
 	}
 
