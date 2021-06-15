@@ -72,15 +72,15 @@ type (
 			X *int `json:"x,omitempty"`
 			Y *int `json:"y,omitempty"`
 		} `json:"gridPos,omitempty"`
-		Height           *string   `json:"height,omitempty"` // general
-		HideTimeOverride *bool     `json:"hideTimeOverride,omitempty"`
-		ID               uint      `json:"id"`
-		IsNew            bool      `json:"isNew"`
-		Links            []Link    `json:"links,omitempty"`    // general
-		MinSpan          *float32  `json:"minSpan,omitempty"`  // templating options
-		OfType           panelType `json:"-"`                  // it required for defining type of the panel
-		Renderer         *string   `json:"renderer,omitempty"` // display styles
-		Repeat           *string   `json:"repeat,omitempty"`   // templating options
+		Height           interface{} `json:"height,omitempty"` // general
+		HideTimeOverride *bool       `json:"hideTimeOverride,omitempty"`
+		ID               uint        `json:"id"`
+		IsNew            bool        `json:"isNew"`
+		Links            []Link      `json:"links,omitempty"`    // general
+		MinSpan          *float32    `json:"minSpan,omitempty"`  // templating options
+		OfType           panelType   `json:"-"`                  // it required for defining type of the panel
+		Renderer         *string     `json:"renderer,omitempty"` // display styles
+		Repeat           *string     `json:"repeat,omitempty"`   // templating options
 		// RepeatIteration *int64   `json:"repeatIteration,omitempty"`
 		RepeatPanelID *uint `json:"repeatPanelId,omitempty"`
 		ScopedVars    map[string]struct {
@@ -397,10 +397,12 @@ type (
 		Alias         string      `json:"alias"`
 		Bars          *bool       `json:"bars,omitempty"`
 		Color         *string     `json:"color,omitempty"`
+		Dashes        *bool       `json:"dashes,omitempty"`
 		Fill          *int        `json:"fill,omitempty"`
 		FillBelowTo   *string     `json:"fillBelowTo,omitempty"`
 		Legend        *bool       `json:"legend,omitempty"`
 		Lines         *bool       `json:"lines,omitempty"`
+		LineWidth     *int        `json:"linewidth,omitempty"`
 		Stack         *BoolString `json:"stack,omitempty"`
 		Transform     *string     `json:"transform,omitempty"`
 		YAxis         *int        `json:"yaxis,omitempty"`
@@ -530,11 +532,11 @@ type Target struct {
 		Field    string `json:"field"`
 		Type     string `json:"type"`
 		Settings struct {
-			Interval    string `json:"interval,omitempty"`
-			MinDocCount int    `json:"min_doc_count"`
-			Order       string `json:"order,omitempty"`
-			OrderBy     string `json:"orderBy,omitempty"`
-			Size        string `json:"size,omitempty"`
+			Interval    string      `json:"interval,omitempty"`
+			MinDocCount interface{} `json:"min_doc_count"`
+			Order       string      `json:"order,omitempty"`
+			OrderBy     string      `json:"orderBy,omitempty"`
+			Size        string      `json:"size,omitempty"`
 		} `json:"settings"`
 	} `json:"bucketAggs,omitempty"`
 
