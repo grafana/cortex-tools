@@ -23,7 +23,7 @@ require (
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b
 	github.com/google/go-github/v32 v32.1.0
 	github.com/gorilla/mux v1.7.3
-	github.com/grafana-tools/sdk v0.0.0-20210521150820-354cd37a4b4e 
+	github.com/grafana-tools/sdk v0.0.0-20210621184808-90d328319afc
 	github.com/grafana/loki v1.6.2-0.20210604065612-c3af249fe0f7
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/oklog/ulid v1.3.1

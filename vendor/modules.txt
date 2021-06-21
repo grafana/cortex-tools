@@ -438,7 +438,7 @@ github.com/gorilla/mux
 github.com/gorilla/websocket
 # github.com/gosimple/slug v1.1.1
 github.com/gosimple/slug
-# github.com/grafana-tools/sdk v0.0.0-20210521150820-354cd37a4b4e
+# github.com/grafana-tools/sdk v0.0.0-20210621184808-90d328319afc
 ## explicit
 github.com/grafana-tools/sdk
 # github.com/grafana/loki v1.6.2-0.20210604065612-c3af249fe0f7
