@@ -51,4 +51,23 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 	grafanaAnalyseCmd.Flag("output", "The path for the output file").
 		Default("metrics-in-grafana.json").
 		StringVar(&gaCmd.outputFile)
+
+	raCmd := &RulerAnalyseCommand{}
+	rulerAnalyseCmd := analyseCmd.Command("ruler", "Analyse and output the metrics used in Cortex rules.").
+		Action(raCmd.run)
+	rulerAnalyseCmd.Flag("address", "Address of the Prometheus/Cortex instance, alternatively set $CORTEX_ADDRESS.").
+		Envar("CORTEX_ADDRESS").
+		Required().
+		StringVar(&raCmd.ClientConfig.Address)
+	rulerAnalyseCmd.Flag("id", "Username to use when contacting Prometheus/Cortex, alternatively set $CORTEX_TENANT_ID.").
+		Envar("CORTEX_TENANT_ID").
+		Default("").
+		StringVar(&raCmd.ClientConfig.ID)
+	rulerAnalyseCmd.Flag("key", "Password to use when contacting Prometheus/Cortex, alternatively set $CORTEX_API_KEY.").
+		Envar("CORTEX_API_KEY").
+		Default("").
+		StringVar(&raCmd.ClientConfig.Key)
+	rulerAnalyseCmd.Flag("output", "The path for the output file").
+		Default("metrics-in-ruler.json").
+		StringVar(&raCmd.outputFile)
 }
