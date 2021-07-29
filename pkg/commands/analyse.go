@@ -32,7 +32,7 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 		StringVar(&paCmd.grafanaMetricsFile)
 	prometheusAnalyseCmd.Flag("ruler-metrics-file", "The path for the input file containing the metrics from ruler-analyse command").
 		Default("metrics-in-ruler.json").
-		StringVar(&paCmd.grafanaMetricsFile)
+		StringVar(&paCmd.rulerMetricsFile)
 	prometheusAnalyseCmd.Flag("output", "The path for the output file").
 		Default("prometheus-metrics.json").
 		StringVar(&paCmd.outputFile)
