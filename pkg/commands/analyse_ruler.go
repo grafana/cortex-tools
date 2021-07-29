@@ -24,6 +24,7 @@ type RulerAnalyseCommand struct {
 
 func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
 	output := &analyse.MetricsInRuler{}
+	output.OverallMetrics = make(map[string]struct{})
 
 	cli, err := client.New(cmd.ClientConfig)
 	if err != nil {

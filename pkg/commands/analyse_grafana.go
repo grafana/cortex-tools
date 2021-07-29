@@ -37,6 +37,7 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 	}
 
 	output := &analyse.MetricsInGrafana{}
+	output.OverallMetrics = make(map[string]struct{})
 
 	for _, link := range boardLinks {
 		board, _, err := c.GetDashboardByUID(ctx, link.UID)
@@ -82,6 +83,11 @@ func parseMetricsInBoard(mig *analyse.MetricsInGrafana, board sdk.Board) {
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
 		parseErrors = append(parseErrors, metricsFromPanel(*panel, metrics)...)
+		if panel.RowPanel != nil {
+			for _, subPanel := range panel.RowPanel.Panels {
+				parseErrors = append(parseErrors, metricsFromPanel(subPanel, metrics)...)
+			}
+		}
 	}
 
 	// Iterate through all the rows and collect metrics

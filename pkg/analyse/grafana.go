@@ -2,7 +2,7 @@ package analyse
 
 type MetricsInGrafana struct {
 	MetricsUsed    []string            `json:"metricsUsed"`
-	OverallMetrics map[string]struct{} `json:"overallMetrics"`
+	OverallMetrics map[string]struct{} `json:"-"`
 	Dashboards     []DashboardMetrics  `json:"dashboards"`
 }
 

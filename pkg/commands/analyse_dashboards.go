@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/grafana-tools/sdk"
@@ -16,6 +17,7 @@ type DashboardAnalyseCommand struct {
 
 func (cmd *DashboardAnalyseCommand) run(k *kingpin.ParseContext) error {
 	output := &analyse.MetricsInGrafana{}
+	output.OverallMetrics = make(map[string]struct{})
 
 	for _, file := range cmd.DashFilesList {
 		var board sdk.Board
@@ -24,7 +26,8 @@ func (cmd *DashboardAnalyseCommand) run(k *kingpin.ParseContext) error {
 			return err
 		}
 		if err = json.Unmarshal(buf, &board); err != nil {
-			return (err)
+			fmt.Fprintf(os.Stderr, "%s for %s\n", err, file)
+			continue
 		}
 		parseMetricsInBoard(output, board)
 	}

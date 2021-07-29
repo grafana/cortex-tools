@@ -1,9 +1,9 @@
 package commands
 
 import (
-	"encoding/json"
-
 	"github.com/grafana/cortex-tools/pkg/analyse"
+	"github.com/grafana/cortex-tools/pkg/rules"
+	"github.com/pkg/errors"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -14,22 +14,20 @@ type RuleFileAnalyseCommand struct {
 
 func (cmd *RuleFileAnalyseCommand) run(k *kingpin.ParseContext) error {
 	output := &analyse.MetricsInRuler{}
+	output.OverallMetrics = make(map[string]struct{})
 
-	for _, file := range cmd.RuleFilesList {
-		var ruleConf analyse.RuleConfig
-		buf, err := loadFile(file)
-		if err != nil {
-			return err
-		}
-		if err = json.Unmarshal(buf, &ruleConf); err != nil {
-			return (err)
-		}
-		for _, group := range ruleConf.RuleGroups {
-			parseMetricsInRuleGroup(output, group, ruleConf.Namespace)
+	nss, err := rules.ParseFiles("cortex", cmd.RuleFilesList)
+	if err != nil {
+		return errors.Wrap(err, "analyse operation unsuccessful, unable to parse rules files")
+	}
+
+	for _, ns := range nss {
+		for _, group := range ns.Groups {
+			parseMetricsInRuleGroup(output, group, ns.Namespace)
 		}
 	}
 
-	err := writeOutRuleMetrics(output, cmd.outputFile)
+	err = writeOutRuleMetrics(output, cmd.outputFile)
 	if err != nil {
 		return err
 	}

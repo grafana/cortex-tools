@@ -76,13 +76,19 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 
 	daCmd := &DashboardAnalyseCommand{}
 	dashboardAnalyseCmd := analyseCmd.Command("dashboards", "Analyse and output the metrics used in Grafana dashboard files").Action(daCmd.run)
-	dashboardAnalyseCmd.Flag("files", "Dashboard files").
+	dashboardAnalyseCmd.Arg("files", "Dashboard files").
 		Required().
 		ExistingFilesVar(&daCmd.DashFilesList)
+	dashboardAnalyseCmd.Flag("output", "The path for the output file").
+		Default("metrics-in-grafana.json").
+		StringVar(&daCmd.outputFile)
 
 	rfCmd := &RuleFileAnalyseCommand{}
 	ruleFileAnalyseCmd := analyseCmd.Command("rule-file", "Analyse and output the metrics used in Prometheus rules files").Action(rfCmd.run)
-	ruleFileAnalyseCmd.Flag("files", "Rules files").
+	ruleFileAnalyseCmd.Arg("files", "Rules files").
 		Required().
 		ExistingFilesVar(&rfCmd.RuleFilesList)
+	ruleFileAnalyseCmd.Flag("output", "The path for the output file").
+		Default("metrics-in-ruler.json").
+		StringVar(&rfCmd.outputFile)
 }
