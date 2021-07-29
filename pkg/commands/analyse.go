@@ -30,6 +30,9 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 	prometheusAnalyseCmd.Flag("grafana-metrics-file", "The path for the input file containing the metrics from grafana-analyse command").
 		Default("metrics-in-grafana.json").
 		StringVar(&paCmd.grafanaMetricsFile)
+	prometheusAnalyseCmd.Flag("ruler-metrics-file", "The path for the input file containing the metrics from ruler-analyse command").
+		Default("metrics-in-ruler.json").
+		StringVar(&paCmd.grafanaMetricsFile)
 	prometheusAnalyseCmd.Flag("output", "The path for the output file").
 		Default("prometheus-metrics.json").
 		StringVar(&paCmd.outputFile)
@@ -70,4 +73,16 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 	rulerAnalyseCmd.Flag("output", "The path for the output file").
 		Default("metrics-in-ruler.json").
 		StringVar(&raCmd.outputFile)
+
+	daCmd := &DashboardAnalyseCommand{}
+	dashboardAnalyseCmd := analyseCmd.Command("dashboards", "Analyse and output the metrics used in Grafana dashboard files").Action(daCmd.run)
+	dashboardAnalyseCmd.Flag("files", "Dashboard files").
+		Required().
+		ExistingFilesVar(&daCmd.DashFilesList)
+
+	rfCmd := &RuleFileAnalyseCommand{}
+	ruleFileAnalyseCmd := analyseCmd.Command("rule-file", "Analyse and output the metrics used in Prometheus rules files").Action(rfCmd.run)
+	ruleFileAnalyseCmd.Flag("files", "Rules files").
+		Required().
+		ExistingFilesVar(&rfCmd.RuleFilesList)
 }

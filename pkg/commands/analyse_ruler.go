@@ -7,25 +7,23 @@ import (
 	"os"
 	"sort"
 
-	"github.com/grafana/cortex-tools/pkg/analyse"
-	"github.com/grafana/cortex-tools/pkg/client"
-	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 	"github.com/prometheus/prometheus/promql/parser"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/grafana/cortex-tools/pkg/analyse"
+	"github.com/grafana/cortex-tools/pkg/client"
+	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
 )
 
 type RulerAnalyseCommand struct {
 	ClientConfig client.Config
-
-	cli *client.CortexClient
-
-	outputFile string
+	cli          *client.CortexClient
+	outputFile   string
 }
 
 func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
-	output := analyse.MetricsInRuler{}
-	allMetrics := map[string]struct{}{}
+	output := &analyse.MetricsInRuler{}
 
 	cli, err := client.New(cmd.ClientConfig)
 	if err != nil {
@@ -40,64 +38,38 @@ func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
 
 	for ns := range rules {
 		for _, rg := range rules[ns] {
-			metrics, err := parseMetricsInRuleGroup(ns, rg)
+			err := parseMetricsInRuleGroup(output, rg, ns)
 			// todo
 			if err != nil {
 				log.Fatalf("metrics parse error %v", err)
 			}
-
-			metricsInGroup := make([]string, 0, len(metrics))
-			for metric := range metrics {
-				if metric == "" {
-					continue
-				}
-				metricsInGroup = append(metricsInGroup, metric)
-				allMetrics[metric] = struct{}{}
-			}
-			output.RuleGroups = append(output.RuleGroups, analyse.RuleGroupMetrics{
-				Namespace: ns,
-				GroupName: rg.Name,
-				Metrics:   metricsInGroup,
-			})
 		}
 	}
 
-	metricsUsed := make([]string, 0, len(allMetrics))
-	for metric := range allMetrics {
-		metricsUsed = append(metricsUsed, metric)
-	}
-	sort.Strings(metricsUsed)
-
-	output.MetricsUsed = metricsUsed
-	out, err := json.MarshalIndent(output, "", "  ")
+	err = writeOutRuleMetrics(output, cmd.outputFile)
 	if err != nil {
-		return err
-	}
-
-	if err := ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func parseMetricsInRuleGroup(ns string, group rwrulefmt.RuleGroup) (map[string]struct{}, error) {
+func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGroup, ns string) error {
 	ruleMetrics := map[string]struct{}{}
 	refMetrics := map[string]struct{}{}
 
 	rules := group.Rules
 	for _, rule := range rules {
+		//todo check this
 		if rule.Record.Value != "" {
 			ruleMetrics[rule.Record.Value] = struct{}{}
-		} else {
-			ruleMetrics[rule.Alert.Value] = struct{}{}
 		}
 
 		query := rule.Expr.Value
 		expr, err := parser.ParseExpr(query)
 		// todo maintain parse errors
 		if err != nil {
-			return refMetrics, err
+			return err
 		}
 
 		parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
@@ -109,9 +81,24 @@ func parseMetricsInRuleGroup(ns string, group rwrulefmt.RuleGroup) (map[string]s
 		})
 	}
 
-	// should we handle metrics referenced in other RGs?
+	// remove defined recording rule metrics in same RG
 	metrics := diff(ruleMetrics, refMetrics)
-	return metrics, nil
+
+	metricsInGroup := make([]string, 0, len(metrics))
+	for metric := range metrics {
+		if metric == "" {
+			continue
+		}
+		metricsInGroup = append(metricsInGroup, metric)
+		mir.OverallMetrics[metric] = struct{}{}
+	}
+	mir.RuleGroups = append(mir.RuleGroups, analyse.RuleGroupMetrics{
+		Namespace: ns,
+		GroupName: group.Name,
+		Metrics:   metricsInGroup,
+	})
+
+	return nil
 }
 
 func diff(ruleMetrics map[string]struct{}, refMetrics map[string]struct{}) map[string]struct{} {
@@ -121,4 +108,24 @@ func diff(ruleMetrics map[string]struct{}, refMetrics map[string]struct{}) map[s
 		}
 	}
 	return refMetrics
+}
+
+func writeOutRuleMetrics(mir *analyse.MetricsInRuler, outputFile string) error {
+	metricsUsed := make([]string, 0, len(mir.OverallMetrics))
+	for metric := range mir.OverallMetrics {
+		metricsUsed = append(metricsUsed, metric)
+	}
+	sort.Strings(metricsUsed)
+
+	mir.MetricsUsed = metricsUsed
+	out, err := json.MarshalIndent(mir, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile(outputFile, out, os.FileMode(int(0666))); err != nil {
+		return err
+	}
+
+	return nil
 }

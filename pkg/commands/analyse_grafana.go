@@ -26,25 +26,6 @@ type GrafanaAnalyseCommand struct {
 	outputFile string
 }
 
-func (cmd *GrafanaAnalyseCommand) Register(app *kingpin.Application) {
-	grafanaAnalyseCmd := app.Command("grafana", "Analyse and output the metrics used in Grafana Dashboards.").Action(cmd.run)
-
-	grafanaAnalyseCmd.Flag("address", "Address of the Grafana instance, alternatively set $GRAFANA_ADDRESS.").
-		Envar("GRAFANA_ADDRESS").
-		Required().
-		StringVar(&cmd.address)
-	grafanaAnalyseCmd.Flag("key", "Api key to use when contacting Grafana, alternatively set $GRAFANA_API_KEY.").
-		Envar("GRAFANA_API_KEY").
-		Default("").
-		StringVar(&cmd.apiKey)
-	grafanaAnalyseCmd.Flag("read-timeout", "timeout for read requests").
-		Default("300s").
-		DurationVar(&cmd.readTimeout)
-	grafanaAnalyseCmd.Flag("output", "The path for the output file").
-		Default("metrics-in-grafana.json").
-		StringVar(&cmd.outputFile)
-}
-
 func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cmd.readTimeout)
 	defer cancel()
@@ -55,8 +36,7 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	output := analyse.MetricsInGrafana{}
-	overallMetrics := map[string]struct{}{}
+	output := &analyse.MetricsInGrafana{}
 
 	for _, link := range boardLinks {
 		board, _, err := c.GetDashboardByUID(ctx, link.UID)
@@ -64,53 +44,38 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 			fmt.Fprintf(os.Stderr, "%s for %s %s\n", err, link.UID, link.Title)
 			continue
 		}
-
-		metrics, errs := parseMetricsInBoard(board)
-		parseErrs := make([]string, 0, len(errs))
-		for _, err := range errs {
-			parseErrs = append(parseErrs, err.Error())
-		}
-
-		metricsInBoard := make([]string, 0, len(metrics))
-		for metric := range metrics {
-			if metric == "" {
-				continue
-			}
-
-			metricsInBoard = append(metricsInBoard, metric)
-			overallMetrics[metric] = struct{}{}
-		}
-		sort.Strings(metricsInBoard)
-
-		output.Dashboards = append(output.Dashboards, analyse.DashboardMetrics{
-			Slug:        board.Slug,
-			UID:         board.UID,
-			Title:       board.Title,
-			Metrics:     metricsInBoard,
-			ParseErrors: parseErrs,
-		})
+		parseMetricsInBoard(output, board)
 	}
 
-	metricsUsed := make([]string, 0, len(overallMetrics))
-	for metric := range overallMetrics {
-		metricsUsed = append(metricsUsed, metric)
-	}
-	sort.Strings(metricsUsed)
-
-	output.MetricsUsed = metricsUsed
-	out, err := json.MarshalIndent(output, "", "  ")
+	err = writeOut(output, cmd.outputFile)
 	if err != nil {
-		return err
-	}
-
-	if err := ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func parseMetricsInBoard(board sdk.Board) (map[string]struct{}, []error) {
+func writeOut(mig *analyse.MetricsInGrafana, outputFile string) error {
+	metricsUsed := make([]string, 0, len(mig.OverallMetrics))
+	for metric := range mig.OverallMetrics {
+		metricsUsed = append(metricsUsed, metric)
+	}
+	sort.Strings(metricsUsed)
+
+	mig.MetricsUsed = metricsUsed
+	out, err := json.MarshalIndent(mig, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile(outputFile, out, os.FileMode(int(0666))); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func parseMetricsInBoard(mig *analyse.MetricsInGrafana, board sdk.Board) {
 	metrics := map[string]struct{}{}
 	parseErrors := make([]error, 0)
 
@@ -126,7 +91,30 @@ func parseMetricsInBoard(board sdk.Board) (map[string]struct{}, []error) {
 		}
 	}
 
-	return metrics, parseErrors
+	parseErrs := make([]string, 0, len(parseErrors))
+	for _, err := range parseErrors {
+		parseErrs = append(parseErrs, err.Error())
+	}
+
+	metricsInBoard := make([]string, 0, len(metrics))
+	for metric := range metrics {
+		if metric == "" {
+			continue
+		}
+
+		metricsInBoard = append(metricsInBoard, metric)
+		mig.OverallMetrics[metric] = struct{}{}
+	}
+	sort.Strings(metricsInBoard)
+
+	mig.Dashboards = append(mig.Dashboards, analyse.DashboardMetrics{
+		Slug:        board.Slug,
+		UID:         board.UID,
+		Title:       board.Title,
+		Metrics:     metricsInBoard,
+		ParseErrors: parseErrs,
+	})
+
 }
 
 func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
