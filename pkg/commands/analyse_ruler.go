@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/promql/parser"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
@@ -40,7 +41,6 @@ func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
 	for ns := range rules {
 		for _, rg := range rules[ns] {
 			err := parseMetricsInRuleGroup(output, rg, ns)
-			// todo
 			if err != nil {
 				log.Fatalf("metrics parse error %v", err)
 			}
@@ -58,19 +58,20 @@ func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
 func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGroup, ns string) error {
 	ruleMetrics := map[string]struct{}{}
 	refMetrics := map[string]struct{}{}
+	parseErrors := make([]error, 0)
 
 	rules := group.Rules
 	for _, rule := range rules {
-		//todo check this
 		if rule.Record.Value != "" {
 			ruleMetrics[rule.Record.Value] = struct{}{}
 		}
 
 		query := rule.Expr.Value
 		expr, err := parser.ParseExpr(query)
-		// todo maintain parse errors
 		if err != nil {
-			return err
+			parseErrors = append(parseErrors, errors.Wrapf(err, "query=%v", query))
+			log.Debugln("msg", "promql parse error", "err", err, "query", query)
+			continue
 		}
 
 		parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
@@ -83,32 +84,32 @@ func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGr
 	}
 
 	// remove defined recording rule metrics in same RG
-	metrics := diff(ruleMetrics, refMetrics)
+	for ruleMetric := range ruleMetrics {
+		delete(refMetrics, ruleMetric)
+	}
 
-	metricsInGroup := make([]string, 0, len(metrics))
-	for metric := range metrics {
+	metricsInGroup := make([]string, 0, len(refMetrics))
+	for metric := range refMetrics {
 		if metric == "" {
 			continue
 		}
 		metricsInGroup = append(metricsInGroup, metric)
 		mir.OverallMetrics[metric] = struct{}{}
 	}
+
+	parseErrs := make([]string, 0, len(parseErrors))
+	for _, err := range parseErrors {
+		parseErrs = append(parseErrs, err.Error())
+	}
+
 	mir.RuleGroups = append(mir.RuleGroups, analyse.RuleGroupMetrics{
-		Namespace: ns,
-		GroupName: group.Name,
-		Metrics:   metricsInGroup,
+		Namespace:   ns,
+		GroupName:   group.Name,
+		Metrics:     metricsInGroup,
+		ParseErrors: parseErrs,
 	})
 
 	return nil
-}
-
-func diff(ruleMetrics map[string]struct{}, refMetrics map[string]struct{}) map[string]struct{} {
-	for ruleMetric := range ruleMetrics {
-		if _, ok := refMetrics[ruleMetric]; ok {
-			delete(refMetrics, ruleMetric)
-		}
-	}
-	return refMetrics
 }
 
 func writeOutRuleMetrics(mir *analyse.MetricsInRuler, outputFile string) error {

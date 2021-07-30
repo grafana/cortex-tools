@@ -193,11 +193,12 @@ This lets you generate the header which can then be used to enforce access contr
 
 #### Analyse
 
-Run analysis against your Prometheus, Grafana and Cortex to see which metrics being used and exported.
+Run analysis against your Prometheus, Grafana and Cortex to see which metrics being used and exported. Can also extract metrics
+from dashboard JSON and rules YAML files.
 
-##### grafana-analyse 
+##### `analyse grafana`
 
-This command will be run against your Grafana instance and it will download the dashboards and pick the Prometheus metrics that are used in the queries. The output is a JSON file.
+This command will run against your Grafana instance and will download its dashboards and then extract the Prometheus metrics used in its queries. The output is a JSON file.
 
 ###### Configuration
 
@@ -213,24 +214,66 @@ This command will be run against your Grafana instance and it will download the 
 cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
 ```
 
-##### prometheus-analyse 
+##### `analyse ruler`
 
-This command will be run against your Prometheus / GrafanaCloud instance, then it will use the output from `grafana-analyse` show you how many series in the Prometheus server are actually being used in dashboards. Also, it'll show which metrics exist in Grafana Cloud that are **not** in dashboards. The output is a JSON file
+This command will run against your Grafana Cloud Prometheus instance and will fetch its rule groups. It will then extract the Prometheus metrics used in the rule queries. The output is a JSON file.
 
 ###### Configuration
 
 | Env Variables     | Flag      | Description                                                                                                   |
 | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
 | CORTEX_ADDRESS    | `address` | Address of the Prometheus  instance.                                                              |
-| CORTEX_TENANT_ID  | `id`   |  If you're using GrafanaCloud this is your instance ID. |
-|  CORTEX_API_KEY   | `key`   |  If you're using GrafanaCloud this is your API Key. |
+| CORTEX_TENANT_ID  | `id`   |  If you're using Grafana Cloud this is your instance ID. |
+|  CORTEX_API_KEY   | `key`   |  If you're using Grafana Cloud this is your API Key. |
 | __ | `grafana-metrics-file`      | The input file path. metrics-in-grafana.json by default.  |
-| __ | `output`      | The output file path. prometheus-metrics.json by default.  |
+| __ | `ruler-metrics-file`      | The input file path. metrics-in-ruler.json by default.  |
+| __ | `output`      | The output file path. metrics-in-ruler.json by default.  |
 
 ###### Running the command
 
 ```
-cortextool analyse prometheus --address=https://prometheus-us-central1.grafana.net/api/prom --username=<1234> --password=<API-Key> --log.level=debug
+cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --key=<API-Key>
+```
+
+##### `analyse prometheus`
+
+This command will run against your Prometheus / Cloud Prometheus instance. It will then use the output from `grafana-analyse` to show you how many series in the Prometheus server are actually being used in dashboards and rules. Also, it'll show which metrics exist in Grafana Cloud that are **not** in dashboards or rules. The output is a JSON file
+
+###### Configuration
+
+| Env Variables     | Flag      | Description                                                                                                   |
+| ----------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
+| CORTEX_ADDRESS    | `address` | Address of the Prometheus  instance.                                                              |
+| CORTEX_TENANT_ID  | `id`   |  If you're using Grafana Cloud this is your instance ID. |
+|  CORTEX_API_KEY   | `key`   |  If you're using Grafana Cloud this is your API Key. |
+| __ | `grafana-metrics-file`      | The dashboard metrics input file path. `metrics-in-grafana.json` by default.  |
+| __ | `ruler-metrics-file`      | The rules metrics input file path. `metrics-in-ruler.json` by default.  |
+| __ | `output`      | The output file path. `prometheus-metrics.json` by default.  |
+
+###### Running the command
+
+```
+cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --password=<API-Key> --log.level=debug
+```
+
+##### `analyse dashboard`
+
+This command accepts Grafana dashboard JSON files as input and extracts Prometheus metrics used in the queries. The output is a JSON file compatible with `analyse prometheus`.
+
+###### Running the command
+
+```
+cortextool analyse dashboard ./dashboard_one.json ./dashboard_two.json ...
+```
+
+##### `analyse rule-file`
+
+This command accepts Prometheus rule YAML files as input and extracts Prometheus metrics used in the queries. The output is a JSON file compatible with `analyse prometheus`.
+
+###### Running the command
+
+```
+cortextool analyse rule-file ./rule_file_one.yaml ./rule_file_two.yaml ...
 ```
 
 ## chunktool

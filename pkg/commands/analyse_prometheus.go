@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/grafana/cortex-tools/pkg/analyse"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -17,6 +16,8 @@ import (
 	"github.com/prometheus/prometheus/pkg/labels"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/grafana/cortex-tools/pkg/analyse"
 )
 
 type PrometheusAnalyseCommand struct {
@@ -31,7 +32,6 @@ type PrometheusAnalyseCommand struct {
 }
 
 func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
-
 	hasGrafanaMetrics := false
 	hasRulerMetrics := false
 	grafanaMetrics := analyse.MetricsInGrafana{}

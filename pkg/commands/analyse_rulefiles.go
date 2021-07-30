@@ -1,10 +1,11 @@
 package commands
 
 import (
-	"github.com/grafana/cortex-tools/pkg/analyse"
-	"github.com/grafana/cortex-tools/pkg/rules"
 	"github.com/pkg/errors"
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/grafana/cortex-tools/pkg/analyse"
+	"github.com/grafana/cortex-tools/pkg/rules"
 )
 
 type RuleFileAnalyseCommand struct {
@@ -23,7 +24,10 @@ func (cmd *RuleFileAnalyseCommand) run(k *kingpin.ParseContext) error {
 
 	for _, ns := range nss {
 		for _, group := range ns.Groups {
-			parseMetricsInRuleGroup(output, group, ns.Namespace)
+			err := parseMetricsInRuleGroup(output, group, ns.Namespace)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

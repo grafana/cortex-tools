@@ -75,7 +75,7 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 		StringVar(&raCmd.outputFile)
 
 	daCmd := &DashboardAnalyseCommand{}
-	dashboardAnalyseCmd := analyseCmd.Command("dashboards", "Analyse and output the metrics used in Grafana dashboard files").Action(daCmd.run)
+	dashboardAnalyseCmd := analyseCmd.Command("dashboard", "Analyse and output the metrics used in Grafana dashboard files").Action(daCmd.run)
 	dashboardAnalyseCmd.Arg("files", "Dashboard files").
 		Required().
 		ExistingFilesVar(&daCmd.DashFilesList)
