@@ -210,7 +210,7 @@ This command will run against your Grafana instance and will download its dashbo
 
 ###### Running the command
 
-```
+```shell
 cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
 ```
 
@@ -225,13 +225,11 @@ This command will run against your Grafana Cloud Prometheus instance and will fe
 | CORTEX_ADDRESS    | `address` | Address of the Prometheus  instance.                                                              |
 | CORTEX_TENANT_ID  | `id`   |  If you're using Grafana Cloud this is your instance ID. |
 |  CORTEX_API_KEY   | `key`   |  If you're using Grafana Cloud this is your API Key. |
-| __ | `grafana-metrics-file`      | The input file path. metrics-in-grafana.json by default.  |
-| __ | `ruler-metrics-file`      | The input file path. metrics-in-ruler.json by default.  |
 | __ | `output`      | The output file path. metrics-in-ruler.json by default.  |
 
 ###### Running the command
 
-```
+```shell
 cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --key=<API-Key>
 ```
 
@@ -252,7 +250,7 @@ This command will run against your Prometheus / Cloud Prometheus instance. It wi
 
 ###### Running the command
 
-```
+```shell
 cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --password=<API-Key> --log.level=debug
 ```
 
@@ -262,7 +260,7 @@ This command accepts Grafana dashboard JSON files as input and extracts Promethe
 
 ###### Running the command
 
-```
+```shell
 cortextool analyse dashboard ./dashboard_one.json ./dashboard_two.json ...
 ```
 
@@ -272,7 +270,7 @@ This command accepts Prometheus rule YAML files as input and extracts Prometheus
 
 ###### Running the command
 
-```
+```shell
 cortextool analyse rule-file ./rule_file_one.yaml ./rule_file_two.yaml ...
 ```
 

@@ -10,8 +10,8 @@ import (
 
 func TestParseMetricsInRuleFile(t *testing.T) {
 	var metrics = []string{
-		"apiserver_request_duration_seconds_count",
 		"apiserver_request_duration_seconds_bucket",
+		"apiserver_request_duration_seconds_count",
 		"apiserver_request_total",
 	}
 

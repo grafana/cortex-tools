@@ -96,6 +96,7 @@ func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGr
 		metricsInGroup = append(metricsInGroup, metric)
 		mir.OverallMetrics[metric] = struct{}{}
 	}
+	sort.Strings(metricsInGroup)
 
 	parseErrs := make([]string, 0, len(parseErrors))
 	for _, err := range parseErrors {
