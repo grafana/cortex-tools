@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func ParseMetricsInRuleFile(t *testing.T) {
+func TestParseMetricsInRuleFile(t *testing.T) {
 	var metrics = []string{
 		"apiserver_request_duration_seconds_bucket",
 		"apiserver_request_duration_seconds_count",
