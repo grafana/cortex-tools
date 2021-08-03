@@ -59,7 +59,7 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 }
 
 func writeOut(mig *analyse.MetricsInGrafana, outputFile string) error {
-	metricsUsed := make([]string, 0, len(mig.OverallMetrics))
+	var metricsUsed []string
 	for metric := range mig.OverallMetrics {
 		metricsUsed = append(metricsUsed, metric)
 	}
@@ -79,8 +79,8 @@ func writeOut(mig *analyse.MetricsInGrafana, outputFile string) error {
 }
 
 func parseMetricsInBoard(mig *analyse.MetricsInGrafana, board sdk.Board) {
-	metrics := map[string]struct{}{}
-	parseErrors := make([]error, 0)
+	var parseErrors []error
+	metrics := make(map[string]struct{})
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
@@ -102,12 +102,12 @@ func parseMetricsInBoard(mig *analyse.MetricsInGrafana, board sdk.Board) {
 	// Process metrics in templating
 	parseErrors = append(parseErrors, metricsFromTemplating(board.Templating, metrics)...)
 
-	parseErrs := make([]string, 0, len(parseErrors))
+	var parseErrs []string
 	for _, err := range parseErrors {
 		parseErrs = append(parseErrs, err.Error())
 	}
 
-	metricsInBoard := make([]string, 0, len(metrics))
+	var metricsInBoard []string
 	for metric := range metrics {
 		if metric == "" {
 			continue
@@ -162,7 +162,8 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 }
 
 func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
-	parseErrors := []error{}
+	var parseErrors []error
+
 	if panel.GetTargets() == nil {
 		return parseErrors
 	}

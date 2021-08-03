@@ -56,12 +56,13 @@ func (cmd *RulerAnalyseCommand) run(k *kingpin.ParseContext) error {
 }
 
 func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGroup, ns string) error {
-	ruleMetrics := map[string]struct{}{}
-	refMetrics := map[string]struct{}{}
-	parseErrors := make([]error, 0)
+	var (
+		ruleMetrics = make(map[string]struct{})
+		refMetrics  = make(map[string]struct{})
+		parseErrors []error
+	)
 
-	rules := group.Rules
-	for _, rule := range rules {
+	for _, rule := range group.Rules {
 		if rule.Record.Value != "" {
 			ruleMetrics[rule.Record.Value] = struct{}{}
 		}
@@ -88,7 +89,9 @@ func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGr
 		delete(refMetrics, ruleMetric)
 	}
 
-	metricsInGroup := make([]string, 0, len(refMetrics))
+	var metricsInGroup []string
+	var parseErrs []string
+
 	for metric := range refMetrics {
 		if metric == "" {
 			continue
@@ -98,7 +101,6 @@ func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGr
 	}
 	sort.Strings(metricsInGroup)
 
-	parseErrs := make([]string, 0, len(parseErrors))
 	for _, err := range parseErrors {
 		parseErrs = append(parseErrs, err.Error())
 	}
@@ -114,7 +116,7 @@ func parseMetricsInRuleGroup(mir *analyse.MetricsInRuler, group rwrulefmt.RuleGr
 }
 
 func writeOutRuleMetrics(mir *analyse.MetricsInRuler, outputFile string) error {
-	metricsUsed := make([]string, 0, len(mir.OverallMetrics))
+	var metricsUsed []string
 	for metric := range mir.OverallMetrics {
 		metricsUsed = append(metricsUsed, metric)
 	}

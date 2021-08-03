@@ -14,6 +14,7 @@ type RuleFileAnalyseCommand struct {
 }
 
 func (cmd *RuleFileAnalyseCommand) run(k *kingpin.ParseContext) error {
+
 	output := &analyse.MetricsInRuler{}
 	output.OverallMetrics = make(map[string]struct{})
 

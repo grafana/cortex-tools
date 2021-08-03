@@ -32,11 +32,12 @@ type PrometheusAnalyseCommand struct {
 }
 
 func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
-	hasGrafanaMetrics := false
-	hasRulerMetrics := false
-	grafanaMetrics := analyse.MetricsInGrafana{}
-	rulerMetrics := analyse.MetricsInRuler{}
-	metricsUsed := make([]string, 0)
+	var (
+		hasGrafanaMetrics, hasRulerMetrics = false, false
+		grafanaMetrics                     = analyse.MetricsInGrafana{}
+		rulerMetrics                       = analyse.MetricsInRuler{}
+		metricsUsed                        []string
+	)
 
 	if _, err := os.Stat(cmd.grafanaMetricsFile); err == nil {
 		hasGrafanaMetrics = true

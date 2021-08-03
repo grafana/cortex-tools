@@ -56,7 +56,7 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 		StringVar(&gaCmd.outputFile)
 
 	raCmd := &RulerAnalyseCommand{}
-	rulerAnalyseCmd := analyseCmd.Command("ruler", "Analyse and output the metrics used in Cortex rules.").
+	rulerAnalyseCmd := analyseCmd.Command("ruler", "Analyse and extract the metrics used in Cortex rules").
 		Action(raCmd.run)
 	rulerAnalyseCmd.Flag("address", "Address of the Prometheus/Cortex instance, alternatively set $CORTEX_ADDRESS.").
 		Envar("CORTEX_ADDRESS").
