@@ -25,6 +25,8 @@ const (
 	alertnameLabel = "alertname"
 )
 
+var defaultHistogramBuckets = []float64{5, 15, 30, 60, 90, 120, 240}
+
 type timestampKey struct {
 	timestamp   float64
 	alertName   string
@@ -50,10 +52,11 @@ type Receiver struct {
 
 // ReceiverConfig implements the configuration for the alertmanager webhook receiver
 type ReceiverConfig struct {
-	LabelsToForward flagext.StringSliceCSV
-	PurgeInterval   time.Duration
-	PurgeLookback   time.Duration
-	RoundtripLabel  string
+	CustomHistogramBuckets flagext.StringSliceCSV
+	LabelsToForward        flagext.StringSliceCSV
+	PurgeInterval          time.Duration
+	PurgeLookback          time.Duration
+	RoundtripLabel         string
 }
 
 // RegisterFlags registers the flags for the alertmanager webhook receiver
@@ -62,6 +65,7 @@ func (cfg *ReceiverConfig) RegisterFlags(f *flag.FlagSet) {
 	f.DurationVar(&cfg.PurgeInterval, "receiver.purge-interval", 15*time.Minute, "How often should we purge the in-memory measured timestamps tracker.")
 	f.DurationVar(&cfg.PurgeLookback, "receiver.purge-lookback", 2*time.Hour, "Period at which measured timestamps will remain in-memory.")
 	f.Var(&cfg.LabelsToForward, "receiver.labels-to-forward", "Additional labels to split alerts by.")
+	f.Var(&cfg.CustomHistogramBuckets, "receiver.custom-histogram-buckets", "Custom histogram buckets, defaults to 5, 15, 30, 60, 90, 120, 240")
 }
 
 // NewReceiver returns an alertmanager webhook receiver
@@ -106,12 +110,27 @@ func NewReceiver(cfg ReceiverConfig, log log.Logger, reg prometheus.Registerer) 
 		Help:      "Total number of failed evaluations made by the webhook receiver.",
 	})
 
+	var buckets []float64
+
+	if len(cfg.CustomHistogramBuckets) == 0 {
+		buckets = defaultHistogramBuckets
+	} else {
+		buckets = make([]float64, len(cfg.CustomHistogramBuckets))
+		for i, v := range cfg.CustomHistogramBuckets {
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				panic(err)
+			}
+			buckets[i] = n
+		}
+	}
+
 	r.roundtripDuration = promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
 		Namespace:   namespace,
 		Subsystem:   "webhook_receiver",
 		Name:        "end_to_end_duration_seconds",
 		Help:        "Time spent (in seconds) from scraping a metric to receiving an alert.",
-		Buckets:     []float64{5, 15, 30, 60, 90, 120, 240},
+		Buckets:     buckets,
 		ConstLabels: constLabels,
 	}, labelNames)
 
