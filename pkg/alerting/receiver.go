@@ -141,14 +141,13 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 
 	// We only care about firing alerts as part of this analysis.
 	for _, alert := range data.Alerts.Firing() {
-		var labelValues strings.Builder
+
 		labels := map[string]string{}
 
 		var name string
 		for k, v := range alert.Labels {
 			for _, lblName := range r.cfg.LabelsToForward {
 				if lblName == k {
-					labelValues.WriteString(v)
 					labels[k] = v
 				}
 			}
@@ -183,15 +182,19 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if t == 0.0 {
-			level.Debug(r.logger).Log("msg", "alert does not have a `time` annonnation - we can't measure it", "labels", alert.Labels.Names(), "annonnations", alert.Annotations.Names())
+			level.Debug(r.logger).Log("msg", "alert does not have a `time` annotation - we can't measure it", "labels", alert.Labels.Names(), "annonnations", alert.Annotations.Names())
 			continue
 		}
 
-		// fill in any missing label values that were not provided by AM
+		// set label values, in order configured
+		// & fill in any missing label values that were not provided by AM
 		// otherwise the Prom pkg is unhappy
+		var labelValues strings.Builder
 		for _, k := range r.cfg.LabelsToForward {
-			if _, ok := labels[k]; !ok {
+			if v, ok := labels[k]; !ok {
 				labels[k] = ""
+			} else {
+				labelValues.WriteString(v)
 			}
 		}
 
