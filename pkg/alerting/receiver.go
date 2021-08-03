@@ -205,7 +205,7 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 		r.mtx.Lock()
 		if _, exists := r.timestamps[key]; exists {
 			// We have seen this entry before, skip it.
-			level.Debug(r.logger).Log("msg", "entry previously evaluated", "timestamp", t, "alert", name)
+			level.Debug(r.logger).Log("msg", "entry previously evaluated", "timestamp", t, "alert", name, "labelValues", key.labelValues)
 			r.mtx.Unlock()
 			continue
 		}
