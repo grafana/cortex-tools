@@ -235,7 +235,7 @@ cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.gr
 
 ##### `analyse prometheus`
 
-This command will run against your Prometheus / Cloud Prometheus instance. It will then use the output from `grafana-analyse` to show you how many series in the Prometheus server are actually being used in dashboards and rules. Also, it'll show which metrics exist in Grafana Cloud that are **not** in dashboards or rules. The output is a JSON file
+This command will run against your Prometheus / Cloud Prometheus instance. It will then use the output from `analyse grafana` and `analyse ruler` to show you how many series in the Prometheus server are actually being used in dashboards and rules. Also, it'll show which metrics exist in Grafana Cloud that are **not** in dashboards or rules. The output is a JSON file.
 
 ###### Configuration
 
@@ -251,7 +251,7 @@ This command will run against your Prometheus / Cloud Prometheus instance. It wi
 ###### Running the command
 
 ```shell
-cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --password=<API-Key> --log.level=debug
+cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --key=<API-Key> --log.level=debug
 ```
 
 ##### `analyse dashboard`
