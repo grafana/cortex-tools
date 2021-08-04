@@ -160,9 +160,7 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 
 	// We only care about firing alerts as part of this analysis.
 	for _, alert := range data.Alerts.Firing() {
-
 		labels := map[string]string{}
-
 		var name string
 		for k, v := range alert.Labels {
 			for _, lblName := range r.cfg.LabelsToForward {
