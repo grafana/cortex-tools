@@ -147,12 +147,12 @@ func Test_measureLatencyWithAdditionalLabels(t *testing.T) {
 					},
 					// different alert at same time
 					template.Alert{
-						Labels:      template.KV{model.AlertNameLabel: "ADifferentAlertAtTheSameTime"},
+						Labels:      template.KV{model.AlertNameLabel: "e2ealertingAlwaysFiring", "region": "us-west-1"},
 						Annotations: template.KV{"time": "1.604069614e+09"},
 						Status:      string(model.AlertFiring),
 					},
 					template.Alert{
-						Labels:      template.KV{model.AlertNameLabel: "e2ealertingAlwaysFiring"},
+						Labels:      template.KV{model.AlertNameLabel: "e2ealertingAlwaysFiring", "region": "us-east-1"},
 						Annotations: template.KV{"time": "1.604069615e+09"},
 						Status:      string(model.AlertFiring),
 					},
@@ -165,13 +165,13 @@ func Test_measureLatencyWithAdditionalLabels(t *testing.T) {
 					timestamp:   1604069614.00,
 				},
 				{
-					alertName:   "ADifferentAlertAtTheSameTime",
-					labelValues: "",
+					alertName:   "e2ealertingAlwaysFiring",
+					labelValues: "us-west-1",
 					timestamp:   1604069614.00,
 				},
 				{
 					alertName:   "e2ealertingAlwaysFiring",
-					labelValues: "",
+					labelValues: "us-east-1",
 					timestamp:   1604069615.00,
 				},
 			},

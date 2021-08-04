@@ -233,7 +233,7 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 		r.mtx.Unlock()
 
 		r.roundtripDuration.With(labels).Observe(float64(latency))
-		level.Info(r.logger).Log("alert", name, "time", time.Unix(int64(t), 0), "duration_seconds", latency, "status", alert.Status)
+		level.Info(r.logger).Log("alert", name, "labelValues", key.labelValues, "time", time.Unix(int64(t), 0), "duration_seconds", latency, "status", alert.Status)
 		r.evalTotal.Inc()
 	}
 
