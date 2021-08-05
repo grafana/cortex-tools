@@ -143,6 +143,11 @@ func NewReceiver(cfg ReceiverConfig, log log.Logger, reg prometheus.Registerer) 
 // RegisterRoutes registers the receiver API routes with the provided router.
 func (r *Receiver) RegisterRoutes(router *mux.Router) {
 	router.Path("/api/v1/receiver").Methods(http.MethodPost).Handler(http.HandlerFunc(r.measureLatency))
+	router.Path("/health").Methods(http.MethodGet).Handler(http.HandlerFunc(r.health))
+}
+
+func (r *Receiver) health(w http.ResponseWriter, req *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
 
 func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
