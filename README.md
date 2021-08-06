@@ -214,6 +214,35 @@ This command will run against your Grafana instance and will download its dashbo
 cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
 ```
 
+###### Sample output
+
+```json
+{
+  "metricsUsed": [
+    "apiserver_request:availability30d",
+    "workqueue_depth",
+    "workqueue_queue_duration_seconds_bucket", 
+    . . .
+  ],
+  "dashboards": [
+    {
+      "slug": "",
+      "uid": "09ec8aa1e996d6ffcd6817bbaff4db1b",
+      "title": "Kubernetes / API server",
+      "metrics": [
+        "apiserver_request:availability30d",
+        "apiserver_request_total",
+        "cluster_quantile:apiserver_request_duration_seconds:histogram_quantile",
+        "workqueue_depth",
+        "workqueue_queue_duration_seconds_bucket",
+        . . .
+      ],
+      "parse_errors": null
+    }
+  ]
+}
+```
+
 ##### `analyse ruler`
 
 This command will run against your Grafana Cloud Prometheus instance and will fetch its rule groups. It will then extract the Prometheus metrics used in the rule queries. The output is a JSON file.
@@ -231,6 +260,31 @@ This command will run against your Grafana Cloud Prometheus instance and will fe
 
 ```shell
 cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --key=<API-Key>
+```
+
+###### Sample output
+
+```json
+{
+  "metricsUsed": [
+    "apiserver_request_duration_seconds_bucket",
+    "container_cpu_usage_seconds_total",
+    "scheduler_scheduling_algorithm_duration_seconds_bucket"
+    . . .
+  ],
+  "ruleGroups": [
+    {
+      "namspace": "prometheus_rules",
+      "name": "kube-apiserver.rules",
+      "metrics": [
+        "apiserver_request_duration_seconds_bucket",
+        "apiserver_request_duration_seconds_count",
+        "apiserver_request_total"
+      ],
+      "parse_errors": null
+    },
+    . . .
+}
 ```
 
 ##### `analyse prometheus`
@@ -252,6 +306,50 @@ This command will run against your Prometheus / Cloud Prometheus instance. It wi
 
 ```shell
 cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-central1.grafana.net --id=<1234> --key=<API-Key> --log.level=debug
+```
+
+###### Sample output
+
+```json
+{
+  "total_active_series": 38184,
+  "in_use_active_series": 14047,
+  "additional_active_series": 24137,
+  "in_use_metric_counts": [
+    {
+      "metric": "apiserver_request_duration_seconds_bucket",
+      "count": 11400,
+      "job_counts": [
+        {
+          "job": "apiserver",
+          "count": 11400
+        }
+      ]
+    },
+    {
+      "metric": "apiserver_request_total",
+      "count": 684,
+      "job_counts": [
+        {
+          "job": "apiserver",
+          "count": 684
+        }
+      ]
+    },
+    . . .
+  ],
+  "additional_metric_counts": [
+    {
+      "metric": "etcd_request_duration_seconds_bucket",
+      "count": 2688,
+      "job_counts": [
+        {
+          "job": "apiserver",
+          "count": 2688
+        }
+      ]
+    },
+    . . .
 ```
 
 ##### `analyse dashboard`
