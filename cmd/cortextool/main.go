@@ -18,6 +18,7 @@ var (
 	pushGateway              commands.PushGatewayConfig
 	loadgenCommand           commands.LoadgenCommand
 	remoteReadCommand        commands.RemoteReadCommand
+	remoteWriteOOOCommand       commands.RemoteWriteOOOCommand
 	aclCommand               commands.AccessControlCommand
 	analyseCommand           commands.AnalyseCommand
 	bucketValidateCommand    commands.BucketValidationCommand
@@ -33,6 +34,7 @@ func main() {
 	pushGateway.Register(app)
 	loadgenCommand.Register(app)
 	remoteReadCommand.Register(app)
+	remoteWriteOOOCommand.Register(app)
 	overridesExporterCommand.Register(app)
 	aclCommand.Register(app)
 	analyseCommand.Register(app)
