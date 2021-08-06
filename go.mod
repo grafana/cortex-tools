@@ -68,3 +68,5 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 // Required for Alertmanager
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+
+replace github.com/grafana-tools/sdk => github.com/hjet/sdk v0.0.0-20210806204906-55773255130e
