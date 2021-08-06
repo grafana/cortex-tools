@@ -36,9 +36,9 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 	defer cancel()
 
 	c, err := sdk.NewClient(cmd.address, cmd.apiKey, sdk.DefaultHTTPClient)
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 	boardLinks, err := c.SearchDashboards(ctx, "", false)
 	if err != nil {
 		return err
