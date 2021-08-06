@@ -222,7 +222,7 @@ cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
     "apiserver_request:availability30d",
     "workqueue_depth",
     "workqueue_queue_duration_seconds_bucket", 
-    . . .
+    ...
   ],
   "dashboards": [
     {
@@ -235,7 +235,7 @@ cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
         "cluster_quantile:apiserver_request_duration_seconds:histogram_quantile",
         "workqueue_depth",
         "workqueue_queue_duration_seconds_bucket",
-        . . .
+        ...
       ],
       "parse_errors": null
     }
@@ -270,7 +270,7 @@ cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.gr
     "apiserver_request_duration_seconds_bucket",
     "container_cpu_usage_seconds_total",
     "scheduler_scheduling_algorithm_duration_seconds_bucket"
-    . . .
+    ...
   ],
   "ruleGroups": [
     {
@@ -283,7 +283,7 @@ cortextool analyse ruler --address=https://prometheus-blocks-prod-us-central1.gr
       ],
       "parse_errors": null
     },
-    . . .
+    ...
 }
 ```
 
@@ -336,7 +336,7 @@ cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-centra
         }
       ]
     },
-    . . .
+    ...
   ],
   "additional_metric_counts": [
     {
@@ -349,7 +349,7 @@ cortextool analyse prometheus --address=https://prometheus-blocks-prod-us-centra
         }
       ]
     },
-    . . .
+    ...
 ```
 
 ##### `analyse dashboard`
