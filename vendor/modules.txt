@@ -438,7 +438,7 @@ github.com/gorilla/mux
 github.com/gorilla/websocket
 # github.com/gosimple/slug v1.1.1
 github.com/gosimple/slug
-# github.com/grafana-tools/sdk v0.0.0-20210621184808-90d328319afc
+# github.com/grafana-tools/sdk v0.0.0-20210808170449-9de4d14888c5
 ## explicit
 github.com/grafana-tools/sdk
 # github.com/grafana/loki v1.6.2-0.20210604065612-c3af249fe0f7
@@ -530,7 +530,7 @@ github.com/lann/ps
 github.com/lib/pq
 github.com/lib/pq/oid
 github.com/lib/pq/scram
-# github.com/mailru/easyjson v0.7.6
+# github.com/mailru/easyjson v0.7.7
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
@@ -1026,7 +1026,7 @@ golang.org/x/oauth2/jwt
 ## explicit
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.0.0-20210503173754-0981d6026fa6
+# golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
 golang.org/x/sys/internal/unsafeheader
