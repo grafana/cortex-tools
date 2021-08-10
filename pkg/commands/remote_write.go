@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -118,13 +120,16 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	Labels := []prompb.Label{
+	labels := []prompb.Label{
 		{Name: "__name__", Value: c.metricName},
 		{Name: "job", Value: "node_exporter"},
 		{Name: "instance", Value: "test_instance"},
 		{Name: "cpu", Value: "0"},
 		{Name: "mode", Value: "idle"},
 	}
+	sort.Slice(labels, func(i, j int) bool {
+		return strings.Compare(labels[i].Name, labels[j].Name) < 0
+	})
 	req := prompb.WriteRequest{
 		Timeseries: make([]prompb.TimeSeries, 0, c.batchSize),
 	}
@@ -140,7 +145,7 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 			}
 
 			req.Timeseries = append(req.Timeseries, prompb.TimeSeries{
-				Labels: Labels,
+				Labels: labels,
 				Samples: []prompb.Sample{
 					{
 						Timestamp: ts,
