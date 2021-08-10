@@ -145,7 +145,6 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 
 	requestCh := c.startWorkers()
 	ticker := time.NewTicker(c.writeInterval)
-	timeSeries := make([]prompb.TimeSeries, 0, c.seriesCount)
 	samples := make([]prompb.Sample, 0, c.batchSize)
 	var ts int64
 	for range ticker.C {
@@ -172,12 +171,6 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 			}
 			seriesLabels := append(labels, seriesLabel)
 
-			timeSeries = timeSeries[:0]
-			timeSeries = append(timeSeries, prompb.TimeSeries{
-				Labels:  seriesLabels,
-				Samples: samples,
-			})
-
 			if c.verbose {
 				var seriesString string
 				for labelIdx, label := range seriesLabels {
@@ -196,7 +189,10 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 			}
 
 			data, err := proto.Marshal(&prompb.WriteRequest{
-				Timeseries: timeSeries,
+				Timeseries: []prompb.TimeSeries{{
+					Labels:  seriesLabels,
+					Samples: samples,
+				}},
 			})
 			if err != nil {
 				fmt.Printf("failed to marshal request: %s\n", err)
