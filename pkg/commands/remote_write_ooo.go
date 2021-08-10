@@ -82,7 +82,7 @@ func (c *RemoteWriteOOOCommand) Register(app *kingpin.Application) {
 		IntVar(&c.batchSize)
 
 	remoteWriteCmd.Flag("write-interval", "interval at which batches are written").
-		Default("15s").
+		Default("5s").
 		DurationVar(&c.writeInterval)
 
 	remoteWriteCmd.Flag("verbose", "write all samples that get sent").
@@ -173,12 +173,10 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 			}
 			seriesLabels := append(labels, seriesLabel)
 
-			for _, sample := range samples {
-				timeSeries = append(timeSeries, prompb.TimeSeries{
-					Labels:  seriesLabels,
-					Samples: []prompb.Sample{sample},
-				})
-			}
+			timeSeries = append(timeSeries, prompb.TimeSeries{
+				Labels:  seriesLabels,
+				Samples: samples,
+			})
 
 			if c.verbose {
 				var seriesString string
@@ -196,17 +194,17 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 				}
 				fmt.Printf("\n")
 			}
-		}
 
-		data, err := proto.Marshal(&prompb.WriteRequest{
-			Timeseries: timeSeries,
-		})
-		if err != nil {
-			fmt.Printf("failed to marshal request: %s\n", err)
-			return err
-		}
+			data, err := proto.Marshal(&prompb.WriteRequest{
+				Timeseries: timeSeries,
+			})
+			if err != nil {
+				fmt.Printf("failed to marshal request: %s\n", err)
+				return err
+			}
 
-		requestCh <- data
+			requestCh <- data
+		}
 	}
 
 	return nil
