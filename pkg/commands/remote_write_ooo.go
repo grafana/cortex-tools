@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage/remote"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -26,10 +28,13 @@ type RemoteWriteOOOCommand struct {
 	tenantID string
 	apiKey   string
 
-	metricName string
+	metricName  string
+	seriesCount int
 
+	threadCount   int
 	batchSize     int
 	writeInterval time.Duration
+	verbose       bool
 
 	timeout time.Duration
 }
@@ -60,17 +65,29 @@ func (c *RemoteWriteOOOCommand) Register(app *kingpin.Application) {
 		Default("test_metric").
 		StringVar(&c.metricName)
 
+	remoteWriteCmd.Flag("series-count", "Number of series to write.").
+		Default("10").
+		IntVar(&c.seriesCount)
+
+	remoteWriteCmd.Flag("thread-count", "Number of threads that write concurrently.").
+		Default("10").
+		IntVar(&c.threadCount)
+
 	remoteWriteCmd.Flag("timeout", "timeout for write requests").
 		Default("30s").
 		DurationVar(&c.timeout)
 
-	remoteWriteCmd.Flag("batch-size", "how many samples get written with each request").
-		Default("1000").
+	remoteWriteCmd.Flag("batch-size", "how many samples get written per series with each request").
+		Default("100").
 		IntVar(&c.batchSize)
 
 	remoteWriteCmd.Flag("write-interval", "interval at which batches are written").
-		Default("1s").
+		Default("15s").
 		DurationVar(&c.writeInterval)
+
+	remoteWriteCmd.Flag("verbose", "write all samples that get sent").
+		Default("false").
+		BoolVar(&c.verbose)
 }
 
 func (c *RemoteWriteOOOCommand) writeClient() (remote.WriteClient, error) {
@@ -115,11 +132,6 @@ func (c *RemoteWriteOOOCommand) writeClient() (remote.WriteClient, error) {
 }
 
 func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
-	writeClient, err := c.writeClient()
-	if err != nil {
-		return err
-	}
-
 	labels := []prompb.Label{
 		{Name: "__name__", Value: c.metricName},
 		{Name: "job", Value: "node_exporter"},
@@ -130,41 +142,100 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 	sort.Slice(labels, func(i, j int) bool {
 		return strings.Compare(labels[i].Name, labels[j].Name) < 0
 	})
-	req := prompb.WriteRequest{
-		Timeseries: make([]prompb.TimeSeries, 0, c.batchSize),
-	}
+
+	requestCh := c.startWorkers()
 	ticker := time.NewTicker(c.writeInterval)
+	timeSeries := make([]prompb.TimeSeries, 0, c.seriesCount)
+	samples := make([]prompb.Sample, 0, c.batchSize)
+	var ts int64
 	for range ticker.C {
-		var ts int64
-		for i := int64(0); i < int64(c.batchSize); i++ {
-			if i == 0 {
+		timeSeries = timeSeries[:0]
+		samples = samples[:0]
+		for sampleIdx := 0; sampleIdx < c.batchSize; sampleIdx++ {
+			if sampleIdx == 0 {
 				ts = time.Now().Unix() * 1000
-			} else if i == 1 {
-				// All except the first sample are out of order, because they're 1 second older than the first sample of the batch
-				ts = ts - 1000
+			} else if sampleIdx == 1 {
+				// All except the first sample of each series are out of order
+				// because they're 1 second older than the first sample of the batch
+				ts = ts - 1000 - c.writeInterval.Milliseconds()
 			}
 
-			req.Timeseries = append(req.Timeseries, prompb.TimeSeries{
-				Labels: labels,
-				Samples: []prompb.Sample{
-					{
-						Timestamp: ts,
-						Value:     float64(i),
-					},
-				},
+			samples = append(samples, prompb.Sample{
+				Timestamp: ts,
+				Value:     float64(sampleIdx),
 			})
 		}
 
-		data, err := proto.Marshal(&req)
+		for seriesIdx := 0; seriesIdx < c.seriesCount; seriesIdx++ {
+			seriesLabel := prompb.Label{
+				Name:  "unique_label",
+				Value: strconv.Itoa(seriesIdx),
+			}
+			seriesLabels := append(labels, seriesLabel)
+
+			for _, sample := range samples {
+				timeSeries = append(timeSeries, prompb.TimeSeries{
+					Labels:  seriesLabels,
+					Samples: []prompb.Sample{sample},
+				})
+			}
+
+			if c.verbose {
+				var seriesString string
+				for labelIdx, label := range seriesLabels {
+					if labelIdx > 0 {
+						seriesString = seriesString + ";"
+					}
+					seriesString = seriesString + label.Name + "=" + label.Value
+				}
+
+				fmt.Printf("Series: %s\n", seriesString)
+
+				for _, sample := range samples {
+					fmt.Printf("ts: %d, value: %f, ", sample.Timestamp, sample.Value)
+				}
+				fmt.Printf("\n")
+			}
+		}
+
+		data, err := proto.Marshal(&prompb.WriteRequest{
+			Timeseries: timeSeries,
+		})
 		if err != nil {
+			fmt.Printf("failed to marshal request: %s\n", err)
 			return err
 		}
 
-		err = writeClient.Store(context.Background(), snappy.Encode(nil, data))
-		if err != nil {
-			fmt.Printf("Error writing: %s", err)
-		}
+		requestCh <- data
 	}
 
 	return nil
+}
+
+func (c *RemoteWriteOOOCommand) startWorkers() chan []byte {
+	requestCh := make(chan []byte, c.threadCount)
+
+	worker := func() error {
+		writeClient, err := c.writeClient()
+		if err != nil {
+			fmt.Printf("failed to instantiate client: %s\n", err)
+			return err
+		}
+
+		for req := range requestCh {
+			err = writeClient.Store(context.Background(), snappy.Encode(nil, req))
+			if err != nil {
+				fmt.Printf("Error writing request: %s", err)
+			}
+		}
+
+		return nil
+	}
+
+	group, _ := errgroup.WithContext(context.Background())
+	for i := 0; i < c.threadCount; i++ {
+		group.Go(worker)
+	}
+
+	return requestCh
 }
