@@ -147,12 +147,12 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 
 	// We only care about firing alerts as part of this analysis.
 	for _, alert := range data.Alerts.Firing() {
-		labels := map[string]string{}
+		labelsToForward := map[string]string{}
 		var name string
 		for k, v := range alert.Labels {
 			for _, lblName := range r.cfg.LabelsToForward {
 				if lblName == k {
-					labels[k] = v
+					labelsToForward[k] = v
 				}
 			}
 
@@ -161,7 +161,7 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 			}
 
 			name = v
-			labels[alertnameLabel] = v
+			labelsToForward[alertnameLabel] = v
 		}
 
 		if name == "" {
@@ -192,24 +192,27 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 
 		// build a unique key of label values to track
 		// to track when a timestamp was already seen
-		var labelValues strings.Builder
+		// preserve order specified to be consistent
+		var uniqueLabelKey strings.Builder
 		for _, k := range r.cfg.LabelsToTrack {
-			if v, ok := labels[k]; ok {
-				labelValues.WriteString(v)
+			for alertKey, v := range alert.Labels {
+				if alertKey == k {
+					uniqueLabelKey.WriteString(v)
+				}
 			}
 		}
 
 		// fill in any missing Prom labels
 		for _, k := range r.cfg.LabelsToForward {
-			if _, ok := labels[k]; !ok {
-				labels[k] = ""
+			if _, ok := labelsToForward[k]; !ok {
+				labelsToForward[k] = ""
 			}
 		}
 
 		key := timestampKey{
 			timestamp:   t,
 			alertName:   name,
-			labelValues: labelValues.String(),
+			labelValues: uniqueLabelKey.String(),
 		}
 
 		latency := now.Unix() - int64(t)
@@ -223,7 +226,7 @@ func (r *Receiver) measureLatency(w http.ResponseWriter, req *http.Request) {
 		r.timestamps[key] = struct{}{}
 		r.mtx.Unlock()
 
-		r.roundtripDuration.With(labels).Observe(float64(latency))
+		r.roundtripDuration.With(labelsToForward).Observe(float64(latency))
 		level.Info(r.logger).Log("alert", name, "labelValues", key.labelValues, "time", time.Unix(int64(t), 0), "duration_seconds", latency, "status", alert.Status)
 		r.evalTotal.Inc()
 	}
