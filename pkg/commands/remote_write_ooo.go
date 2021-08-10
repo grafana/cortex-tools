@@ -154,7 +154,7 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 				ts = time.Now().Unix() * 1000
 			} else if sampleIdx == 1 {
 				// All except the first sample of each series are out of order
-				// because they're 1 second older than the first sample of the batch
+				// because they're older than the first sample of the batch
 				ts = ts - 1000 - c.writeInterval.Milliseconds()
 			}
 
