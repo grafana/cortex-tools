@@ -149,7 +149,6 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 	samples := make([]prompb.Sample, 0, c.batchSize)
 	var ts int64
 	for range ticker.C {
-		timeSeries = timeSeries[:0]
 		samples = samples[:0]
 		for sampleIdx := 0; sampleIdx < c.batchSize; sampleIdx++ {
 			if sampleIdx == 0 {
@@ -173,6 +172,7 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 			}
 			seriesLabels := append(labels, seriesLabel)
 
+			timeSeries = timeSeries[:0]
 			timeSeries = append(timeSeries, prompb.TimeSeries{
 				Labels:  seriesLabels,
 				Samples: samples,
@@ -211,7 +211,7 @@ func (c *RemoteWriteOOOCommand) remoteWriteOOO(k *kingpin.ParseContext) error {
 }
 
 func (c *RemoteWriteOOOCommand) startWorkers() chan []byte {
-	requestCh := make(chan []byte, c.threadCount)
+	requestCh := make(chan []byte, c.seriesCount)
 
 	worker := func() error {
 		writeClient, err := c.writeClient()
