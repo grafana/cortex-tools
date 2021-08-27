@@ -24,8 +24,8 @@ type GrafanaAnalyseCommand struct {
 	address     string
 	apiKey      string
 	readTimeout time.Duration
-
-	outputFile string
+	tags        string
+	outputFile  string
 }
 
 func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
@@ -40,7 +40,8 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	boardLinks, err := c.SearchDashboards(ctx, "", false)
+	tags := strings.Split(cmd.tags, ",")
+	boardLinks, err := c.SearchDashboards(ctx, "", false, tags...)
 	if err != nil {
 		return err
 	}
