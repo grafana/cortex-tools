@@ -5,7 +5,7 @@ WORKDIR /build_dir
 ENV GOPROXY=https://proxy.golang.org
 RUN make clean && make chunktool
 
-FROM       alpine:3.13
+FROM       alpine:3.14
 RUN        apk add --update --no-cache ca-certificates
 COPY       --from=build /build_dir/cmd/chunktool/chunktool /usr/bin/chunktool
 EXPOSE     80

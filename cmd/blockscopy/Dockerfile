@@ -5,7 +5,7 @@ WORKDIR /build_dir
 ENV GOPROXY=https://proxy.golang.org
 RUN make clean && make blockscopy
 
-FROM       alpine:3.13
+FROM       alpine:3.14
 RUN        apk add --update --no-cache ca-certificates
 COPY       --from=build /build_dir/cmd/blockscopy/blockscopy /usr/bin/blockscopy
 EXPOSE     80
