@@ -45,7 +45,7 @@ func main() {
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		panic(http.ListenAndServe(":80", nil))
+		panic(http.ListenAndServe(":411", nil))
 	}()
 
 	level.Info(logger).Log("msg", "starting benchmarker")

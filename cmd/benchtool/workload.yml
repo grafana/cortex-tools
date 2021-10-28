@@ -8,11 +8,11 @@ replicas: 20
 series:
   - labels:
       - name: host
-        unique_values: 1000
+        unique_values: 500
         value_prefix: machine
     name: metric_gauge_random
     static_labels:
-      environment: "dev"
+      environment: "prod"
       region: "us-central-0"
     type: gauge-random
 write_options:
