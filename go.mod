@@ -10,7 +10,7 @@ require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15
 	github.com/cortexproject/cortex v1.9.1-0.20210603172355-5e508061891a
 	github.com/dlclark/regexp2 v1.2.0 // indirect
-	github.com/go-kit/kit v0.10.0
+	github.com/go-kit/log v0.1.0
 	github.com/gocql/gocql v0.0.0-20200526081602-cd04bd7f22a7
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.3
