@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,9 @@ var DefaultHTTPClientConfig = HTTPClientConfig{
 var defaultHTTPClientOptions = httpClientOptions{
 	keepAlivesEnabled: true,
 	http2Enabled:      true,
+	// 5 minutes is typically above the maximum sane scrape interval. So we can
+	// use keepalive for all configurations.
+	idleConnTimeout: 5 * time.Minute,
 }
 
 type closeIdler interface {
@@ -283,6 +287,7 @@ type httpClientOptions struct {
 	dialContextFunc   DialContextFunc
 	keepAlivesEnabled bool
 	http2Enabled      bool
+	idleConnTimeout   time.Duration
 }
 
 // HTTPClientOption defines an option that can be applied to the HTTP client.
@@ -306,6 +311,13 @@ func WithKeepAlivesDisabled() HTTPClientOption {
 func WithHTTP2Disabled() HTTPClientOption {
 	return func(opts *httpClientOptions) {
 		opts.http2Enabled = false
+	}
+}
+
+// WithIdleConnTimeout allows setting the idle connection timeout.
+func WithIdleConnTimeout(timeout time.Duration) HTTPClientOption {
+	return func(opts *httpClientOptions) {
+		opts.idleConnTimeout = timeout
 	}
 }
 
@@ -357,31 +369,34 @@ func NewRoundTripperFromConfig(cfg HTTPClientConfig, name string, optFuncs ...HT
 		// The only timeout we care about is the configured scrape timeout.
 		// It is applied on request. So we leave out any timings here.
 		var rt http.RoundTripper = &http.Transport{
-			Proxy:               http.ProxyURL(cfg.ProxyURL.URL),
-			MaxIdleConns:        20000,
-			MaxIdleConnsPerHost: 1000, // see https://github.com/golang/go/issues/13801
-			DisableKeepAlives:   !opts.keepAlivesEnabled,
-			TLSClientConfig:     tlsConfig,
-			DisableCompression:  true,
-			// 5 minutes is typically above the maximum sane scrape interval. So we can
-			// use keepalive for all configurations.
-			IdleConnTimeout:       5 * time.Minute,
+			Proxy:                 http.ProxyURL(cfg.ProxyURL.URL),
+			MaxIdleConns:          20000,
+			MaxIdleConnsPerHost:   1000, // see https://github.com/golang/go/issues/13801
+			DisableKeepAlives:     !opts.keepAlivesEnabled,
+			TLSClientConfig:       tlsConfig,
+			DisableCompression:    true,
+			IdleConnTimeout:       opts.idleConnTimeout,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 			DialContext:           dialContext,
 		}
-		if opts.http2Enabled {
+		if opts.http2Enabled || os.Getenv("PROMETHEUS_COMMON_ENABLE_HTTP2") != "" {
 			// HTTP/2 support is golang has many problematic cornercases where
 			// dead connections would be kept and used in connection pools.
 			// https://github.com/golang/go/issues/32388
 			// https://github.com/golang/go/issues/39337
 			// https://github.com/golang/go/issues/39750
-			// TODO: Re-Enable HTTP/2 once upstream issue is fixed.
-			// TODO: use ForceAttemptHTTP2 when we move to Go 1.13+.
-			err := http2.ConfigureTransport(rt.(*http.Transport))
+
+			// Enable HTTP2 if the environment variable
+			// PROMETHEUS_COMMON_ENABLE_HTTP2 is set.
+			// This is a temporary workaround so that users can safely test this
+			// and validate that HTTP2 can be enabled Prometheus-Wide again.
+
+			http2t, err := http2.ConfigureTransports(rt.(*http.Transport))
 			if err != nil {
 				return nil, err
 			}
+			http2t.ReadIdleTimeout = time.Minute
 		}
 
 		// If a authorization_credentials is provided, create a round tripper that will set the

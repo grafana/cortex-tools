@@ -10,7 +10,7 @@ require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15
 	github.com/cortexproject/cortex v1.9.1-0.20210603172355-5e508061891a
 	github.com/dlclark/regexp2 v1.2.0 // indirect
-	github.com/go-kit/log v0.1.0
+	github.com/go-kit/log v0.2.0
 	github.com/gocql/gocql v0.0.0-20200526081602-cd04bd7f22a7
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.3
@@ -31,14 +31,14 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/alertmanager v0.22.1-0.20210603124511-8b584eb2265e
-	github.com/prometheus/client_golang v1.10.0
-	github.com/prometheus/common v0.26.1-0.20210603143733-6ef301f414bf
+	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/common v0.30.0
 	github.com/prometheus/prometheus v1.8.2-0.20210510213326-e313ffa8abf6
-	github.com/sirupsen/logrus v1.7.0
+	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.7.0
 	github.com/thanos-io/thanos v0.19.1-0.20210427154226-d5bd651319d2
 	github.com/weaveworks/common v0.0.0-20210419092856-009d1eebd624
-	go.uber.org/atomic v1.7.0
+	go.uber.org/atomic v1.9.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	google.golang.org/api v0.46.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
@@ -68,3 +68,5 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 // Required for Alertmanager
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+
+replace github.com/go-kit/kit => github.com/go-kit/kit v0.12.0
