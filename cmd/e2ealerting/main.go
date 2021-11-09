@@ -7,7 +7,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/grafana/cortex-tools/pkg/alerting"
 
-	"github.com/cortexproject/cortex/pkg/util/flagext"
+	"github.com/grafana/dskit/flagext"
 	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/weaveworks/common/logging"

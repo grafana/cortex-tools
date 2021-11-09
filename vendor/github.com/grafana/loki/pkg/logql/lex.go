@@ -36,6 +36,10 @@ var tokens = map[string]int{
 	"]":            CLOSE_BRACKET,
 	OpLabelReplace: LABEL_REPLACE,
 	OpOffset:       OFFSET,
+	OpOn:           ON,
+	OpIgnoring:     IGNORING,
+	OpGroupLeft:    GROUP_LEFT,
+	OpGroupRight:   GROUP_RIGHT,
 
 	// binops
 	OpTypeOr:     OR,
@@ -55,14 +59,18 @@ var tokens = map[string]int{
 	OpTypeLTE:   LTE,
 
 	// parsers
-	OpParserTypeJSON:   JSON,
-	OpParserTypeRegexp: REGEXP,
-	OpParserTypeLogfmt: LOGFMT,
-	OpParserTypeUnpack: UNPACK,
+	OpParserTypeJSON:    JSON,
+	OpParserTypeRegexp:  REGEXP,
+	OpParserTypeLogfmt:  LOGFMT,
+	OpParserTypeUnpack:  UNPACK,
+	OpParserTypePattern: PATTERN,
 
 	// fmt
 	OpFmtLabel: LABEL_FMT,
 	OpFmtLine:  LINE_FMT,
+
+	// filter functions
+	OpFilterIP: IP,
 }
 
 // functionTokens are tokens that needs to be suffixes with parenthesis
@@ -99,6 +107,9 @@ var functionTokens = map[string]int{
 	OpConvBytes:           BYTES_CONV,
 	OpConvDuration:        DURATION_CONV,
 	OpConvDurationSeconds: DURATION_SECONDS_CONV,
+
+	// filterOp
+	OpFilterIP: IP,
 }
 
 type lexer struct {
@@ -185,7 +196,11 @@ func (l *lexer) Lex(lval *exprSymType) int {
 		}
 	}
 
-	if tok, ok := functionTokens[tokenText]; ok && isFunction(l.Scanner) {
+	if tok, ok := functionTokens[tokenText]; ok {
+		if !isFunction(l.Scanner) {
+			lval.str = tokenText
+			return IDENTIFIER
+		}
 		return tok
 	}
 

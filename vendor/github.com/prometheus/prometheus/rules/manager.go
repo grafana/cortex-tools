@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -213,7 +213,7 @@ type Rule interface {
 	// Labels of the rule.
 	Labels() labels.Labels
 	// eval evaluates the rule, including any associated recording or alerting actions.
-	Eval(context.Context, time.Time, QueryFunc, *url.URL) (promql.Vector, error)
+	Eval(context.Context, time.Time, QueryFunc, *url.URL, int) (promql.Vector, error)
 	// String returns a human-readable string representation of the rule.
 	String() string
 	// Query returns the rule query expression.
@@ -244,6 +244,7 @@ type Group struct {
 	name                 string
 	file                 string
 	interval             time.Duration
+	limit                int
 	rules                []Rule
 	seriesInPreviousEval []map[string]labels.Labels // One per Rule.
 	staleSeries          []labels.Labels
@@ -267,6 +268,7 @@ type Group struct {
 type GroupOptions struct {
 	Name, File    string
 	Interval      time.Duration
+	Limit         int
 	Rules         []Rule
 	ShouldRestore bool
 	Opts          *ManagerOptions
@@ -295,6 +297,7 @@ func NewGroup(o GroupOptions) *Group {
 		name:                 o.Name,
 		file:                 o.File,
 		interval:             o.Interval,
+		limit:                o.Limit,
 		rules:                o.Rules,
 		shouldRestore:        o.ShouldRestore,
 		opts:                 o.Opts,
@@ -318,6 +321,9 @@ func (g *Group) Rules() []Rule { return g.rules }
 
 // Interval returns the group's interval.
 func (g *Group) Interval() time.Duration { return g.interval }
+
+// Limit returns the group's limit.
+func (g *Group) Limit() int { return g.limit }
 
 func (g *Group) run(ctx context.Context) {
 	defer close(g.terminated)
@@ -591,7 +597,7 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 
 			g.metrics.EvalTotal.WithLabelValues(GroupKey(g.File(), g.Name())).Inc()
 
-			vector, err := rule.Eval(ctx, ts, g.opts.QueryFunc, g.opts.ExternalURL)
+			vector, err := rule.Eval(ctx, ts, g.opts.QueryFunc, g.opts.ExternalURL, g.Limit())
 			if err != nil {
 				rule.SetHealth(HealthBad)
 				rule.SetLastError(err)
@@ -604,6 +610,8 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 				}
 				return
 			}
+			rule.SetHealth(HealthGood)
+			rule.SetLastError(nil)
 			samplesTotal += float64(len(vector))
 
 			if ar, ok := rule.(*AlertingRule); ok {
@@ -848,6 +856,10 @@ func (g *Group) Equals(ng *Group) bool {
 		return false
 	}
 
+	if g.limit != ng.limit {
+		return false
+	}
+
 	if len(g.rules) != len(ng.rules) {
 		return false
 	}
@@ -946,11 +958,11 @@ func (m *Manager) Stop() {
 
 // Update the rule manager's state as the config requires. If
 // loading the new rules failed the old rule set is restored.
-func (m *Manager) Update(interval time.Duration, files []string, externalLabels labels.Labels) error {
+func (m *Manager) Update(interval time.Duration, files []string, externalLabels labels.Labels, externalURL string) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	groups, errs := m.LoadGroups(interval, externalLabels, files...)
+	groups, errs := m.LoadGroups(interval, externalLabels, externalURL, files...)
 	if errs != nil {
 		for _, e := range errs {
 			level.Error(m.logger).Log("msg", "loading groups failed", "err", e)
@@ -1034,7 +1046,7 @@ func (FileLoader) Parse(query string) (parser.Expr, error) { return parser.Parse
 
 // LoadGroups reads groups from a list of files.
 func (m *Manager) LoadGroups(
-	interval time.Duration, externalLabels labels.Labels, filenames ...string,
+	interval time.Duration, externalLabels labels.Labels, externalURL string, filenames ...string,
 ) (map[string]*Group, []error) {
 	groups := make(map[string]*Group)
 
@@ -1067,6 +1079,7 @@ func (m *Manager) LoadGroups(
 						labels.FromMap(r.Labels),
 						labels.FromMap(r.Annotations),
 						externalLabels,
+						externalURL,
 						m.restored,
 						log.With(m.logger, "alert", r.Alert),
 					))
@@ -1083,6 +1096,7 @@ func (m *Manager) LoadGroups(
 				Name:          rg.Name,
 				File:          fn,
 				Interval:      itv,
+				Limit:         rg.Limit,
 				Rules:         rules,
 				ShouldRestore: shouldRestore,
 				Opts:          m.opts,

@@ -23,11 +23,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/alecthomas/units"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/common/sigv4"
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/prometheus/prometheus/discovery"
@@ -172,14 +174,24 @@ var (
 
 	// DefaultMetadataConfig is the default metadata configuration for a remote write endpoint.
 	DefaultMetadataConfig = MetadataConfig{
-		Send:         true,
-		SendInterval: model.Duration(1 * time.Minute),
+		Send:              true,
+		SendInterval:      model.Duration(1 * time.Minute),
+		MaxSamplesPerSend: 500,
 	}
 
 	// DefaultRemoteReadConfig is the default remote read configuration.
 	DefaultRemoteReadConfig = RemoteReadConfig{
 		RemoteTimeout:    model.Duration(1 * time.Minute),
 		HTTPClientConfig: config.DefaultHTTPClientConfig,
+	}
+
+	// DefaultStorageConfig is the default TSDB/Exemplar storage configuration.
+	DefaultStorageConfig = StorageConfig{
+		ExemplarsConfig: &DefaultExemplarsConfig,
+	}
+
+	DefaultExemplarsConfig = ExemplarsConfig{
+		MaxExemplars: 100000,
 	}
 )
 
@@ -189,6 +201,7 @@ type Config struct {
 	AlertingConfig AlertingConfig  `yaml:"alerting,omitempty"`
 	RuleFiles      []string        `yaml:"rule_files,omitempty"`
 	ScrapeConfigs  []*ScrapeConfig `yaml:"scrape_configs,omitempty"`
+	StorageConfig  StorageConfig   `yaml:"storage,omitempty"`
 
 	RemoteWriteConfigs []*RemoteWriteConfig `yaml:"remote_write,omitempty"`
 	RemoteReadConfigs  []*RemoteReadConfig  `yaml:"remote_read,omitempty"`
@@ -382,6 +395,9 @@ type ScrapeConfig struct {
 	MetricsPath string `yaml:"metrics_path,omitempty"`
 	// The URL scheme with which to fetch metrics from targets.
 	Scheme string `yaml:"scheme,omitempty"`
+	// An uncompressed response body larger than this many bytes will cause the
+	// scrape to fail. 0 means no limit.
+	BodySizeLimit units.Base2Bytes `yaml:"body_size_limit,omitempty"`
 	// More than this many samples post metric-relabeling will cause the scrape to
 	// fail.
 	SampleLimit uint `yaml:"sample_limit,omitempty"`
@@ -457,6 +473,18 @@ func (c *ScrapeConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // MarshalYAML implements the yaml.Marshaler interface.
 func (c *ScrapeConfig) MarshalYAML() (interface{}, error) {
 	return discovery.MarshalYAMLWithInlineConfigs(c)
+}
+
+// StorageConfig configures runtime reloadable configuration options.
+type StorageConfig struct {
+	ExemplarsConfig *ExemplarsConfig `yaml:"exemplars,omitempty"`
+}
+
+// ExemplarsConfig configures runtime reloadable configuration options.
+type ExemplarsConfig struct {
+	// MaxExemplars sets the size, in # of exemplars stored, of the single circular buffer used to store exemplars in memory.
+	// Use a value of 0 or less than 0 to disable the storage without having to restart Prometheus.
+	MaxExemplars int64 `yaml:"max_exemplars,omitempty"`
 }
 
 // AlertingConfig configures alerting and alertmanager related configs.
@@ -639,7 +667,7 @@ type RemoteWriteConfig struct {
 	HTTPClientConfig config.HTTPClientConfig `yaml:",inline"`
 	QueueConfig      QueueConfig             `yaml:"queue_config,omitempty"`
 	MetadataConfig   MetadataConfig          `yaml:"metadata_config,omitempty"`
-	SigV4Config      *SigV4Config            `yaml:"sigv4,omitempty"`
+	SigV4Config      *sigv4.SigV4Config      `yaml:"sigv4,omitempty"`
 }
 
 // SetDirectory joins any relative file paths with dir.
@@ -727,17 +755,8 @@ type MetadataConfig struct {
 	Send bool `yaml:"send"`
 	// SendInterval controls how frequently we send metric metadata.
 	SendInterval model.Duration `yaml:"send_interval"`
-}
-
-// SigV4Config is the configuration for signing remote write requests with
-// AWS's SigV4 verification process. Empty values will be retrieved using the
-// AWS default credentials chain.
-type SigV4Config struct {
-	Region    string        `yaml:"region,omitempty"`
-	AccessKey string        `yaml:"access_key,omitempty"`
-	SecretKey config.Secret `yaml:"secret_key,omitempty"`
-	Profile   string        `yaml:"profile,omitempty"`
-	RoleARN   string        `yaml:"role_arn,omitempty"`
+	// Maximum number of samples per send.
+	MaxSamplesPerSend int `yaml:"max_samples_per_send,omitempty"`
 }
 
 // RemoteReadConfig is the configuration for reading from remote storage.
