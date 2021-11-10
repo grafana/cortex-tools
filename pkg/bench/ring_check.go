@@ -68,7 +68,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 		),
 	)
 	dnsProvider := dns.NewProvider(logger, dnsProviderReg, dns.GolangResolverType)
-	r.MemberlistKV = memberlist.NewKVInitService(&cfg.MemberlistKV, logger, dnsProvider, reg)
+	r.MemberlistKV = memberlist.NewKVInitService(&cfg.MemberlistKV, logger, dnsProvider, dnsProviderReg)
 	cfg.RingConfig.KVStore.MemberlistKV = r.MemberlistKV.GetMemberlistKV
 
 	var err error
