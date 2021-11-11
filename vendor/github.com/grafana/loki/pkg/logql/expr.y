@@ -15,7 +15,7 @@ import (
   Grouping                *grouping
   Labels                  []string
   LogExpr                 LogSelectorExpr
-  LogRangeExpr            *logRange
+  LogRangeExpr            *LogRange
   Matcher                 *labels.Matcher
   Matchers                []*labels.Matcher
   RangeAggregationExpr    SampleExpr
@@ -25,16 +25,20 @@ import (
   VectorAggregationExpr   SampleExpr
   MetricExpr              SampleExpr
   VectorOp                string
+  FilterOp                string
   BinOpExpr               SampleExpr
   LabelReplaceExpr        SampleExpr
   binOp                   string
   bytes                   uint64
   str                     string
   duration                time.Duration
-  LiteralExpr             *literalExpr
-  BinOpModifier           BinOpOptions
-  LabelParser             *labelParserExpr
-  LineFilters             *lineFilterExpr
+  LiteralExpr             *LiteralExpr
+  BinOpModifier           *BinOpOptions
+  BoolModifier            *BinOpOptions
+  OnOrIgnoringModifier    *BinOpOptions
+  LabelParser             *LabelParserExpr
+  LineFilters             *LineFilterExpr
+  LineFilter              *LineFilterExpr
   PipelineExpr            MultiStageExpr
   PipelineStage           StageExpr
   BytesFilter             log.LabelFilterer
@@ -42,15 +46,16 @@ import (
   DurationFilter          log.LabelFilterer
   LabelFilter             log.LabelFilterer
   UnitFilter              log.LabelFilterer
-  LineFormatExpr          *lineFmtExpr
-  LabelFormatExpr         *labelFmtExpr
+  IPLabelFilter           log.LabelFilterer
+  LineFormatExpr          *LineFmtExpr
+  LabelFormatExpr         *LabelFmtExpr
   LabelFormat             log.LabelFmt
   LabelsFormat            []log.LabelFmt
-  JSONExpressionParser    *jsonExpressionParser
+  JSONExpressionParser    *JSONExpressionParser
   JSONExpression          log.JSONExpression
   JSONExpressionList      []log.JSONExpression
-  UnwrapExpr              *unwrapExpr
-  OffsetExpr              *offsetExpr
+  UnwrapExpr              *UnwrapExpr
+  OffsetExpr              *OffsetExpr
 }
 
 %start root
@@ -70,10 +75,13 @@ import (
 %type <Selector>              selector
 %type <VectorAggregationExpr> vectorAggregationExpr
 %type <VectorOp>              vectorOp
+%type <FilterOp>              filterOp
 %type <BinOpExpr>             binOpExpr
 %type <LiteralExpr>           literalExpr
 %type <LabelReplaceExpr>      labelReplaceExpr
 %type <BinOpModifier>         binOpModifier
+%type <BoolModifier>          boolModifier
+%type <OnOrIgnoringModifier>  onOrIgnoringModifier
 %type <LabelParser>           labelParser
 %type <PipelineExpr>          pipelineExpr
 %type <PipelineStage>         pipelineStage
@@ -82,6 +90,7 @@ import (
 %type <DurationFilter>        durationFilter
 %type <LabelFilter>           labelFilter
 %type <LineFilters>           lineFilters
+%type <LineFilter>            lineFilter
 %type <LineFormatExpr>        lineFormatExpr
 %type <LabelFormatExpr>       labelFormatExpr
 %type <LabelFormat>           labelFormat
@@ -91,6 +100,7 @@ import (
 %type <JSONExpressionList>    jsonExpressionList
 %type <UnwrapExpr>            unwrapExpr
 %type <UnitFilter>            unitFilter
+%type <IPLabelFilter>         ipLabelFilter
 %type <OffsetExpr>            offsetExpr
 
 %token <bytes> BYTES
@@ -100,7 +110,7 @@ import (
                   OPEN_PARENTHESIS CLOSE_PARENTHESIS BY WITHOUT COUNT_OVER_TIME RATE SUM AVG MAX MIN COUNT STDDEV STDVAR BOTTOMK TOPK
                   BYTES_OVER_TIME BYTES_RATE BOOL JSON REGEXP LOGFMT PIPE LINE_FMT LABEL_FMT UNWRAP AVG_OVER_TIME SUM_OVER_TIME MIN_OVER_TIME
                   MAX_OVER_TIME STDVAR_OVER_TIME STDDEV_OVER_TIME QUANTILE_OVER_TIME BYTES_CONV DURATION_CONV DURATION_SECONDS_CONV
-                  FIRST_OVER_TIME LAST_OVER_TIME ABSENT_OVER_TIME LABEL_REPLACE UNPACK OFFSET
+                  FIRST_OVER_TIME LAST_OVER_TIME ABSENT_OVER_TIME LABEL_REPLACE UNPACK OFFSET PATTERN IP ON IGNORING GROUP_LEFT GROUP_RIGHT
 
 // Operators are listed with increasing precedence.
 %left <binOp> OR
@@ -232,20 +242,31 @@ pipelineStage:
    lineFilters                   { $$ = $1 }
   | PIPE labelParser             { $$ = $2 }
   | PIPE jsonExpressionParser    { $$ = $2 }
-  | PIPE labelFilter             { $$ = &labelFilterExpr{LabelFilterer: $2 }}
+  | PIPE labelFilter             { $$ = &LabelFilterExpr{LabelFilterer: $2 }}
   | PIPE lineFormatExpr          { $$ = $2 }
   | PIPE labelFormatExpr         { $$ = $2 }
   ;
 
+filterOp:
+  IP { $$ = OpFilterIP }
+  ;
+
+lineFilter:
+    filter STRING                                                   { $$ = newLineFilterExpr($1, "", $2) }
+  | filter filterOp OPEN_PARENTHESIS STRING CLOSE_PARENTHESIS       { $$ = newLineFilterExpr($1, $2, $4) }
+  ;
+
 lineFilters:
-    filter STRING                 { $$ = newLineFilterExpr(nil, $1, $2 ) }
-  | lineFilters filter STRING     { $$ = newLineFilterExpr($1, $2, $3 ) }
+    lineFilter                { $$ = $1 }
+  | lineFilters lineFilter    { $$ = newNestedLineFilterExpr($1, $2) }
+  ;
 
 labelParser:
     JSON           { $$ = newLabelParserExpr(OpParserTypeJSON, "") }
   | LOGFMT         { $$ = newLabelParserExpr(OpParserTypeLogfmt, "") }
   | REGEXP STRING  { $$ = newLabelParserExpr(OpParserTypeRegexp, $2) }
   | UNPACK         { $$ = newLabelParserExpr(OpParserTypeUnpack, "") }
+  | PATTERN STRING { $$ = newLabelParserExpr(OpParserTypePattern, $2) }
   ;
 
 jsonExpressionParser:
@@ -268,6 +289,7 @@ labelFormatExpr: LABEL_FMT labelsFormat { $$ = newLabelFmtExpr($2) };
 
 labelFilter:
       matcher                                        { $$ = log.NewStringLabelFilter($1) }
+    | ipLabelFilter                                       { $$ = $1 }
     | unitFilter                                     { $$ = $1 }
     | numberFilter                                   { $$ = $1 }
     | OPEN_PARENTHESIS labelFilter CLOSE_PARENTHESIS { $$ = $2 }
@@ -283,6 +305,11 @@ jsonExpression:
 jsonExpressionList:
     jsonExpression                          { $$ = []log.JSONExpression{$1} }
   | jsonExpressionList COMMA jsonExpression { $$ = append($1, $3) }
+  ;
+
+ipLabelFilter:
+    IDENTIFIER EQ IP OPEN_PARENTHESIS STRING CLOSE_PARENTHESIS { $$ = log.NewIPLabelFilter($5, $1,log.LabelFilterEqual) }
+  | IDENTIFIER NEQ IP OPEN_PARENTHESIS STRING CLOSE_PARENTHESIS { $$ = log.NewIPLabelFilter($5, $1, log.LabelFilterNotEqual) }
   ;
 
 unitFilter:
@@ -319,7 +346,6 @@ numberFilter:
     | IDENTIFIER CMP_EQ NUMBER  { $$ = log.NewNumericLabelFilter(log.LabelFilterEqual, $1, mustNewFloat($3))}
     ;
 
-// TODO(owen-d): add (on,ignoring) clauses to binOpExpr
 // Operator precedence only works if each of these is listed separately.
 binOpExpr:
          expr OR binOpModifier expr          { $$ = mustNewBinOpExpr("or", $3, $1, $4) }
@@ -339,10 +365,75 @@ binOpExpr:
          | expr LTE binOpModifier expr       { $$ = mustNewBinOpExpr("<=", $3, $1, $4) }
          ;
 
+boolModifier:
+		{
+		 $$ = &BinOpOptions{VectorMatching: &VectorMatching{Card: CardOneToOne}}
+        	}
+        | BOOL
+        	{
+        	 $$ = &BinOpOptions{VectorMatching: &VectorMatching{Card: CardOneToOne}, ReturnBool:true}
+        	}
+        ;
+
+onOrIgnoringModifier:
+    	boolModifier ON OPEN_PARENTHESIS labels CLOSE_PARENTHESIS
+		{
+		$$ = $1
+    		$$.VectorMatching.On=true
+    		$$.VectorMatching.MatchingLabels=$4
+		}
+	| boolModifier ON OPEN_PARENTHESIS CLOSE_PARENTHESIS
+		{
+		$$ = $1
+		$$.VectorMatching.On=true
+		}
+	| boolModifier IGNORING OPEN_PARENTHESIS labels CLOSE_PARENTHESIS
+		{
+		$$ = $1
+    		$$.VectorMatching.MatchingLabels=$4
+		}
+	| boolModifier IGNORING OPEN_PARENTHESIS CLOSE_PARENTHESIS
+		{
+		$$ = $1
+		}
+	;
+
 binOpModifier:
-           { $$ = BinOpOptions{} }
-           | BOOL { $$ = BinOpOptions{ ReturnBool: true } }
-           ;
+	boolModifier {$$ = $1 }
+ 	| onOrIgnoringModifier {$$ = $1 }
+ 	| onOrIgnoringModifier GROUP_LEFT
+                	{
+                        $$ = $1
+                        $$.VectorMatching.Card = CardManyToOne
+                        }
+ 	| onOrIgnoringModifier GROUP_LEFT OPEN_PARENTHESIS CLOSE_PARENTHESIS
+        	{
+                $$ = $1
+                $$.VectorMatching.Card = CardManyToOne
+                }
+ 	| onOrIgnoringModifier GROUP_LEFT OPEN_PARENTHESIS labels CLOSE_PARENTHESIS
+                {
+                $$ = $1
+                $$.VectorMatching.Card = CardManyToOne
+                $$.VectorMatching.Include = $4
+                }
+        | onOrIgnoringModifier GROUP_RIGHT
+        	{
+                $$ = $1
+                $$.VectorMatching.Card = CardOneToMany
+                }
+ 	| onOrIgnoringModifier GROUP_RIGHT OPEN_PARENTHESIS CLOSE_PARENTHESIS
+                {
+                $$ = $1
+                $$.VectorMatching.Card = CardOneToMany
+                }
+ 	| onOrIgnoringModifier GROUP_RIGHT OPEN_PARENTHESIS labels CLOSE_PARENTHESIS
+                {
+                $$ = $1
+                $$.VectorMatching.Card = CardOneToMany
+                $$.VectorMatching.Include = $4
+                }
+        ;
 
 literalExpr:
            NUMBER         { $$ = mustNewLiteralExpr( $1, false ) }

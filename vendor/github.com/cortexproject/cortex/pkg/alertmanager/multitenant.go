@@ -13,8 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	"github.com/grafana/dskit/concurrency"
+	"github.com/grafana/dskit/flagext"
+	"github.com/grafana/dskit/kv"
+	"github.com/grafana/dskit/ring"
+	"github.com/grafana/dskit/ring/client"
+	"github.com/grafana/dskit/services"
 	"github.com/pkg/errors"
 	"github.com/prometheus/alertmanager/cluster"
 	"github.com/prometheus/alertmanager/cluster/clusterpb"
@@ -30,15 +36,9 @@ import (
 	"github.com/cortexproject/cortex/pkg/alertmanager/alertmanagerpb"
 	"github.com/cortexproject/cortex/pkg/alertmanager/alertspb"
 	"github.com/cortexproject/cortex/pkg/alertmanager/alertstore"
-	"github.com/cortexproject/cortex/pkg/ring"
-	"github.com/cortexproject/cortex/pkg/ring/client"
-	"github.com/cortexproject/cortex/pkg/ring/kv"
 	"github.com/cortexproject/cortex/pkg/tenant"
 	"github.com/cortexproject/cortex/pkg/util"
-	"github.com/cortexproject/cortex/pkg/util/concurrency"
-	"github.com/cortexproject/cortex/pkg/util/flagext"
 	util_log "github.com/cortexproject/cortex/pkg/util/log"
-	"github.com/cortexproject/cortex/pkg/util/services"
 )
 
 const (
@@ -219,6 +219,17 @@ type Limits interface {
 
 	// AlertmanagerMaxTemplateSize returns max size of individual template. 0 = no limit.
 	AlertmanagerMaxTemplateSize(tenant string) int
+
+	// AlertmanagerMaxDispatcherAggregationGroups returns maximum number of aggregation groups in Alertmanager's dispatcher that a tenant can have.
+	// Each aggregation group consumes single goroutine. 0 = unlimited.
+	AlertmanagerMaxDispatcherAggregationGroups(t string) int
+
+	// AlertmanagerMaxAlertsCount returns max number of alerts that tenant can have active at the same time. 0 = no limit.
+	AlertmanagerMaxAlertsCount(tenant string) int
+
+	// AlertmanagerMaxAlertsSizeBytes returns total max size of alerts that tenant can have active at the same time. 0 = no limit.
+	// Size of the alert is computed from alert labels, annotations and generator URL.
+	AlertmanagerMaxAlertsSizeBytes(tenant string) int
 }
 
 // A MultitenantAlertmanager manages Alertmanager instances for multiple
@@ -238,6 +249,10 @@ type MultitenantAlertmanager struct {
 	ring           *ring.Ring
 	distributor    *Distributor
 	grpcServer     *server.Server
+
+	// Last ring state. This variable is not protected with a mutex because it's always
+	// accessed by a single goroutine at a time.
+	ringLastState ring.ReplicationSet
 
 	// Subservices manager (ring, lifecycler)
 	subservices        *services.Manager
@@ -311,6 +326,7 @@ func NewMultitenantAlertmanager(cfg *MultitenantAlertmanagerConfig, store alerts
 			cluster.DefaultTcpTimeout,
 			cluster.DefaultProbeTimeout,
 			cluster.DefaultProbeInterval,
+			nil,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to initialize gossip mesh")
@@ -329,7 +345,8 @@ func NewMultitenantAlertmanager(cfg *MultitenantAlertmanagerConfig, store alerts
 		ringStore, err = kv.NewClient(
 			cfg.ShardingRing.KVStore,
 			ring.GetCodec(),
-			kv.RegistererWithKVName(registerer, "alertmanager"),
+			kv.RegistererWithKVName(prometheus.WrapRegistererWithPrefix("cortex_", registerer), "alertmanager"),
+			logger,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "create KV store client")
@@ -381,7 +398,7 @@ func createMultitenantAlertmanager(cfg *MultitenantAlertmanagerConfig, fallbackC
 	}
 
 	if cfg.ShardingEnabled {
-		lifecyclerCfg, err := am.cfg.ShardingRing.ToLifecyclerConfig()
+		lifecyclerCfg, err := am.cfg.ShardingRing.ToLifecyclerConfig(am.logger)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to initialize Alertmanager's lifecycler config")
 		}
@@ -392,18 +409,14 @@ func createMultitenantAlertmanager(cfg *MultitenantAlertmanagerConfig, fallbackC
 		delegate = ring.NewLeaveOnStoppingDelegate(delegate, am.logger)
 		delegate = ring.NewAutoForgetDelegate(am.cfg.ShardingRing.HeartbeatTimeout*ringAutoForgetUnhealthyPeriods, delegate, am.logger)
 
-		am.ringLifecycler, err = ring.NewBasicLifecycler(lifecyclerCfg, RingNameForServer, RingKey, ringStore, delegate, am.logger, am.registry)
+		am.ringLifecycler, err = ring.NewBasicLifecycler(lifecyclerCfg, RingNameForServer, RingKey, ringStore, delegate, am.logger, prometheus.WrapRegistererWithPrefix("cortex_", am.registry))
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to initialize Alertmanager's lifecycler")
 		}
 
-		am.ring, err = ring.NewWithStoreClientAndStrategy(am.cfg.ShardingRing.ToRingConfig(), RingNameForServer, RingKey, ringStore, ring.NewIgnoreUnhealthyInstancesReplicationStrategy())
+		am.ring, err = ring.NewWithStoreClientAndStrategy(am.cfg.ShardingRing.ToRingConfig(), RingNameForServer, RingKey, ringStore, ring.NewIgnoreUnhealthyInstancesReplicationStrategy(), prometheus.WrapRegistererWithPrefix("cortex_", am.registry), am.logger)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to initialize Alertmanager's ring")
-		}
-
-		if am.registry != nil {
-			am.registry.MustRegister(am.ring)
 		}
 
 		am.grpcServer = server.NewServer(&handlerForGRPCServer{am: am})
@@ -477,6 +490,10 @@ func (am *MultitenantAlertmanager) starting(ctx context.Context) (err error) {
 	}
 
 	if am.cfg.ShardingEnabled {
+		// Store the ring state after the initial Alertmanager configs sync has been done and before we do change
+		// our state in the ring.
+		am.ringLastState, _ = am.ring.GetAllHealthy(RingOp)
+
 		// Make sure that all the alertmanagers we were initially configured with have
 		// fetched state from the replicas, before advertising as ACTIVE. This will
 		// reduce the possibility that we lose state when new instances join/leave.
@@ -620,10 +637,8 @@ func (am *MultitenantAlertmanager) run(ctx context.Context) error {
 	defer tick.Stop()
 
 	var ringTickerChan <-chan time.Time
-	var ringLastState ring.ReplicationSet
 
 	if am.cfg.ShardingEnabled {
-		ringLastState, _ = am.ring.GetAllHealthy(RingOp)
 		ringTicker := time.NewTicker(util.DurationWithJitter(am.cfg.ShardingRing.RingCheckPeriod, 0.2))
 		defer ringTicker.Stop()
 		ringTickerChan = ringTicker.C
@@ -645,8 +660,8 @@ func (am *MultitenantAlertmanager) run(ctx context.Context) error {
 			// replication set which we use to compare with the previous state.
 			currRingState, _ := am.ring.GetAllHealthy(RingOp)
 
-			if ring.HasReplicationSetChanged(ringLastState, currRingState) {
-				ringLastState = currRingState
+			if ring.HasReplicationSetChanged(am.ringLastState, currRingState) {
+				am.ringLastState = currRingState
 				if err := am.loadAndSyncConfigs(ctx, reasonRingChange); err != nil {
 					level.Warn(am.logger).Log("msg", "error while synchronizing alertmanager configs", "err", err)
 				}
@@ -806,14 +821,25 @@ func (am *MultitenantAlertmanager) setConfig(cfg alertspb.AlertConfigDesc) error
 	var userAmConfig *amconfig.Config
 	var err error
 	var hasTemplateChanges bool
+	var userTemplateDir = filepath.Join(am.getTenantDirectory(cfg.User), templatesDir)
+	var pathsToRemove = make(map[string]struct{})
+
+	// List existing files to keep track the ones to be removed
+	if oldTemplateFiles, err := ioutil.ReadDir(userTemplateDir); err == nil {
+		for _, file := range oldTemplateFiles {
+			pathsToRemove[filepath.Join(userTemplateDir, file.Name())] = struct{}{}
+		}
+	}
 
 	for _, tmpl := range cfg.Templates {
-		templateFilepath, err := safeTemplateFilepath(filepath.Join(am.getTenantDirectory(cfg.User), templatesDir), tmpl.Filename)
+		templateFilePath, err := safeTemplateFilepath(userTemplateDir, tmpl.Filename)
 		if err != nil {
 			return err
 		}
 
-		hasChanged, err := storeTemplateFile(templateFilepath, tmpl.Body)
+		// Removing from pathsToRemove map the files that still exists in the config
+		delete(pathsToRemove, templateFilePath)
+		hasChanged, err := storeTemplateFile(templateFilePath, tmpl.Body)
 		if err != nil {
 			return err
 		}
@@ -821,6 +847,14 @@ func (am *MultitenantAlertmanager) setConfig(cfg alertspb.AlertConfigDesc) error
 		if hasChanged {
 			hasTemplateChanges = true
 		}
+	}
+
+	for pathToRemove := range pathsToRemove {
+		err := os.Remove(pathToRemove)
+		if err != nil {
+			level.Warn(am.logger).Log("msg", "failed to remove file", "file", pathToRemove, "err", err)
+		}
+		hasTemplateChanges = true
 	}
 
 	level.Debug(am.logger).Log("msg", "setting config", "user", cfg.User)

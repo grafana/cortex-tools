@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/cortexproject/cortex/pkg/util/flagext"
 	logutil "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/grafana/dskit/flagext"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/weaveworks/common/logging"
