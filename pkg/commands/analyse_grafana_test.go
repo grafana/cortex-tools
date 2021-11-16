@@ -38,3 +38,22 @@ func TestParseMetricsInBoard(t *testing.T) {
 	analyse.ParseMetricsInBoard(output, board)
 	assert.Equal(t, dashboardMetrics, output.Dashboards[0].Metrics)
 }
+
+var timeseriesPanelMetrics = []string{
+	"my_lovely_metric",
+}
+
+func TestParseMetricsInBoardWithTimeseriesPanel(t *testing.T) {
+	var board sdk.Board
+	output := &analyse.MetricsInGrafana{}
+	output.OverallMetrics = make(map[string]struct{})
+
+	buf, err := loadFile("testdata/timeseries.json")
+	require.NoError(t, err)
+
+	err = json.Unmarshal(buf, &board)
+	require.NoError(t, err)
+
+	analyse.ParseMetricsInBoard(output, board)
+	assert.Equal(t, timeseriesPanelMetrics, output.Dashboards[0].Metrics)
+}
