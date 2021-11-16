@@ -145,22 +145,16 @@ func getCustomPanelTargets(panel sdk.Panel) *[]sdk.Target {
 	return &parsedPanel.Targets
 }
 
-func getPanelTargets(panel sdk.Panel) *[]sdk.Target {
-	targets := panel.GetTargets()
-	if targets == nil {
-		targets = getCustomPanelTargets(panel)
-	}
-
-	return targets
-}
-
 func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 	var parseErrors []error
 
-	targets := getPanelTargets(panel)
+	targets := panel.GetTargets()
 	if targets == nil {
-		parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type: %q", panel.CommonPanel.Type))
-		return parseErrors
+		targets = getCustomPanelTargets(panel)
+		if targets == nil {
+			parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type: %q", panel.CommonPanel.Type))
+			return parseErrors
+		}
 	}
 
 	for _, target := range *targets {

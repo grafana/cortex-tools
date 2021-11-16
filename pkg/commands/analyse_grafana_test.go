@@ -39,10 +39,6 @@ func TestParseMetricsInBoard(t *testing.T) {
 	assert.Equal(t, dashboardMetrics, output.Dashboards[0].Metrics)
 }
 
-var timeseriesPanelMetrics = []string{
-	"my_lovely_metric",
-}
-
 func TestParseMetricsInBoardWithTimeseriesPanel(t *testing.T) {
 	var board sdk.Board
 	output := &analyse.MetricsInGrafana{}
@@ -55,5 +51,5 @@ func TestParseMetricsInBoardWithTimeseriesPanel(t *testing.T) {
 	require.NoError(t, err)
 
 	analyse.ParseMetricsInBoard(output, board)
-	assert.Equal(t, timeseriesPanelMetrics, output.Dashboards[0].Metrics)
+	assert.Equal(t, []string{"my_lovely_metric"}, output.Dashboards[0].Metrics)
 }
