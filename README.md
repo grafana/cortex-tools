@@ -61,6 +61,8 @@ The following commands are used by users to interact with their Cortex alertmana
 
 The following commands are used by users to interact with their Cortex ruler configuration. They can load prometheus rule files, as well as interact with individual rule groups.
 
+**Note:** If you are interacting with a Loki ruler, be sure to add the flag `--backend=loki` to all commands.
+
 ##### Rules List
 
 This command will retrieve all of the rule groups stored in the specified Cortex instance and print each one by rule group name and namespace to the terminal.
@@ -223,7 +225,7 @@ cortextool analyse grafana --address=<grafana-address> --key=<API-Key>
   "metricsUsed": [
     "apiserver_request:availability30d",
     "workqueue_depth",
-    "workqueue_queue_duration_seconds_bucket", 
+    "workqueue_queue_duration_seconds_bucket",
     ...
   ],
   "dashboards": [
