@@ -3,6 +3,7 @@ package analyse
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -84,7 +85,21 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 		if templateVar.Type != "query" {
 			continue
 		}
-		if query, ok := templateVar.Query.(string); ok {
+
+		query, ok := templateVar.Query.(string)
+		if !ok {
+			iter := reflect.ValueOf(templateVar.Query).MapRange()
+			for iter.Next() {
+				key := iter.Key().Interface()
+				value := iter.Value().Interface()
+				if key == "query" {
+					query = value.(string)
+					break
+				}
+			}
+		}
+
+		if query != "" {
 			// label_values
 			if strings.Contains(query, "label_values") {
 				re := regexp.MustCompile(`label_values\(([a-zA-Z0-9_]+)`)
