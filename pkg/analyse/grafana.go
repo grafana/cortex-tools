@@ -88,7 +88,7 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 
 		query, ok := templateVar.Query.(string)
 		if !ok {
-			iter := reflect.ValueOf(templateVar.Query).MapRange()
+			iter := reflect.ValueOf(templateVar.Query).MapRange() // A query struct
 			for iter.Next() {
 				key := iter.Key().Interface()
 				value := iter.Value().Interface()
@@ -219,7 +219,7 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 	re := regexp.MustCompile(`\[\s*\$(\w+|{\w+})\]`) // variable rate interval
 	query = re.ReplaceAllString(query, "[1s]")
 
-	re1 := regexp.MustCompile(`offset\s+\$(\w+|{\w+})`) // variable rate interval
+	re1 := regexp.MustCompile(`offset\s+\$(\w+|{\w+})`) // variable offset
 	query = re1.ReplaceAllString(query, "offset 1s")
 
 	re2 := regexp.MustCompile(`(by\s*\()\$((\w+|{\w+}))`) // variable by clause
