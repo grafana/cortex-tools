@@ -102,7 +102,7 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 		if query != "" {
 			// label_values
 			if strings.Contains(query, "label_values") {
-				re := regexp.MustCompile(`label_values\(([a-zA-Z0-9_]+)`)
+				re := regexp.MustCompile(`label_values\(\s*([a-zA-Z0-9_]+)`)
 				sm := re.FindStringSubmatch(query)
 				// In case of really gross queries, like - https://github.com/grafana/jsonnet-libs/blob/e97ab17f67ab40d5fe3af7e59151dd43be03f631/hass-mixin/dashboard.libsonnet#L93
 				if len(sm) > 0 {
