@@ -133,7 +133,19 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 // Workaround to support Grafana "timeseries" panel. This should
 // be implemented in grafana/tools-sdk, and removed from here.
 func getCustomPanelTargets(panel sdk.Panel) *[]sdk.Target {
-	if panel.CommonPanel.Type != "timeseries" {
+
+	switch panel.CommonPanel.Type {
+	case
+		"timeseries",
+		"piechart",
+		"gauge",
+		"table-old",
+		"jdbranham-diagram-panel",
+		"agenty-flowcharting-panel",
+		"grafana-worldmap-panel",
+		"digiapulssi-breadcrumb-panel",
+		"grafana-piechart-panel":
+	default:
 		return nil
 	}
 
