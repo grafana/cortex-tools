@@ -175,6 +175,20 @@ func getCustomPanelTargets(panel sdk.Panel) *[]sdk.Target {
 func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 	var parseErrors []error
 
+	switch panel.CommonPanel.Type {
+	case
+		"row",
+		"welcome",
+		"dashlist",
+		"news",
+		"annolist",
+		"alertlist",
+		"pluginlist",
+		"grafana-clock-panel",
+		"text":
+		return parseErrors // Let's not throw parse errors...these don't contain queries!
+	}
+
 	targets := panel.GetTargets()
 	if targets == nil {
 		targets = getCustomPanelTargets(panel)
