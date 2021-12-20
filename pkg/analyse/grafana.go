@@ -216,6 +216,15 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 }
 
 func parseQuery(query string, metrics map[string]struct{}) error {
+	re := regexp.MustCompile(`\[\s*\$(\w+|{\w+})\]`) // variable rate interval
+	query = re.ReplaceAllString(query, "[1s]")
+
+	re1 := regexp.MustCompile(`offset\s+\$(\w+|{\w+})`) // variable rate interval
+	query = re1.ReplaceAllString(query, "offset 1s")
+
+	re2 := regexp.MustCompile(`(by\s*\()\$((\w+|{\w+}))`) // variable by clause
+	query = re2.ReplaceAllString(query, "$1$2")
+
 	query = strings.ReplaceAll(query, `$__interval`, "5m")
 	query = strings.ReplaceAll(query, `$interval`, "5m")
 	query = strings.ReplaceAll(query, `$resolution`, "5s")
@@ -223,6 +232,13 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 	query = strings.ReplaceAll(query, "$__range", "1d")
 	query = strings.ReplaceAll(query, "${__range_s:glob}", "30")
 	query = strings.ReplaceAll(query, "${__range_s}", "30")
+
+	re3 := regexp.MustCompile(`\$(\w+|{\w+})`)
+	query = re3.ReplaceAllString(query, "79197919") // Strip out all variables
+
+	re4 := regexp.MustCompile(`\$(__(to|from):date:\w+\b|{__(to|from):date:\w+})`)
+	query = re4.ReplaceAllString(query, "12") // Replace dates
+
 	expr, err := parser.ParseExpr(query)
 	if err != nil {
 		return err
@@ -230,6 +246,9 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
 		if n, ok := node.(*parser.VectorSelector); ok {
+			if strings.Contains(n.Name, "79197919") {
+				return errors.New("Query contains a variable in the metric name")
+			}
 			metrics[n.Name] = struct{}{}
 		}
 
