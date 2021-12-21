@@ -233,11 +233,13 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 	query = strings.ReplaceAll(query, "${__range_s:glob}", "30")
 	query = strings.ReplaceAll(query, "${__range_s}", "30")
 
-	re3 := regexp.MustCompile(`\$(\w+|{\w+})`)
-	query = re3.ReplaceAllString(query, "79197919") // Strip out all variables
+	re3 := regexp.MustCompile(`\$(__(to|from):date:\w+\b|{__(to|from):date:\w+})`)
+	query = re3.ReplaceAllString(query, "12") // Replace dates
 
-	re4 := regexp.MustCompile(`\$(__(to|from):date:\w+\b|{__(to|from):date:\w+})`)
-	query = re4.ReplaceAllString(query, "12") // Replace dates
+	// Replace *all* variables.  Magic number 79197919 is used as it's unlikely to appear in a query.  Some queries have
+	// variable metric names. There is a check a few lines below for this edge case.
+	re4 := regexp.MustCompile(`\$(\w+|{\w+})`)
+	query = re4.ReplaceAllString(query, "79197919")
 
 	expr, err := parser.ParseExpr(query)
 	if err != nil {
@@ -246,7 +248,7 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
 		if n, ok := node.(*parser.VectorSelector); ok {
-			if strings.Contains(n.Name, "79197919") {
+			if strings.Contains(n.Name, "79197919") { // Check for the magic number in the metric name..drop it
 				return errors.New("Query contains a variable in the metric name")
 			}
 			metrics[n.Name] = struct{}{}
