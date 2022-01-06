@@ -1,6 +1,10 @@
 package commands
 
 import (
+	"encoding/json"
+	"os"
+
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -91,4 +95,12 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 	ruleFileAnalyseCmd.Flag("output", "The path for the output file").
 		Default("metrics-in-ruler.json").
 		StringVar(&rfCmd.outputFile)
+
+	analyseCmd.Command("queries", "Extract the used metrics and labels from queries fed in on stdin.").Action(func(_ *kingpin.ParseContext) error {
+		metrics, err := processQueries(os.Stdin)
+		if err != nil {
+			log.Fatalf("failed to process queries: %v", err)
+		}
+		return json.NewEncoder(os.Stdout).Encode(metrics)
+	})
 }
