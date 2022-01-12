@@ -33,17 +33,19 @@ type Config struct {
 	Address         string `yaml:"address"`
 	ID              string `yaml:"id"`
 	TLS             tls.ClientConfig
-	UseLegacyRoutes bool `yaml:"use_legacy_routes"`
+	UseLegacyRoutes bool   `yaml:"use_legacy_routes"`
+	AuthToken       string `yaml:"auth_token"`
 }
 
 // CortexClient is used to get and load rules into a cortex ruler
 type CortexClient struct {
-	user     string
-	key      string
-	id       string
-	endpoint *url.URL
-	Client   http.Client
-	apiPath  string
+	user      string
+	key       string
+	id        string
+	endpoint  *url.URL
+	Client    http.Client
+	apiPath   string
+	authToken string
 }
 
 // New returns a new Client
@@ -85,12 +87,13 @@ func New(cfg Config) (*CortexClient, error) {
 	}
 
 	return &CortexClient{
-		user:     cfg.User,
-		key:      cfg.Key,
-		id:       cfg.ID,
-		endpoint: endpoint,
-		Client:   client,
-		apiPath:  path,
+		user:      cfg.User,
+		key:       cfg.Key,
+		id:        cfg.ID,
+		endpoint:  endpoint,
+		Client:    client,
+		apiPath:   path,
+		authToken: cfg.AuthToken,
 	}, nil
 }
 
@@ -118,6 +121,10 @@ func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Res
 		req.SetBasicAuth(r.user, r.key)
 	} else if r.key != "" {
 		req.SetBasicAuth(r.id, r.key)
+	}
+
+	if r.authToken != "" {
+		req.Header.Add("Authorization", r.authToken)
 	}
 
 	req.Header.Add("X-Scope-OrgID", r.id)
