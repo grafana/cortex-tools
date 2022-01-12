@@ -117,6 +117,16 @@ func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Res
 		return nil, err
 	}
 
+	if r.user != "" && r.authToken != "" {
+		err := errors.New("atmost one of basic auth or auth token should be configured")
+		log.WithFields(log.Fields{
+			"url":    req.URL.String(),
+			"method": req.Method,
+			"error":  err,
+		}).Errorln("atmost one of basic auth or auth token should be configured")
+		return nil, err
+	}
+
 	if r.user != "" {
 		req.SetBasicAuth(r.user, r.key)
 	} else if r.key != "" {
