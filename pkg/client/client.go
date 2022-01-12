@@ -123,7 +123,7 @@ func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Res
 			"url":    req.URL.String(),
 			"method": req.Method,
 			"error":  err,
-		}).Errorln("atmost one of basic auth or auth token should be configured")
+		}).Errorln("error during request to cortex api")
 		return nil, err
 	}
 
