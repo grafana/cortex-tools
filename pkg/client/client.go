@@ -134,7 +134,7 @@ func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Res
 	}
 
 	if r.authToken != "" {
-		req.Header.Add("Authorization", r.authToken)
+		req.Header.Add("Authorization", "Bearer "+r.authToken)
 	}
 
 	req.Header.Add("X-Scope-OrgID", r.id)
