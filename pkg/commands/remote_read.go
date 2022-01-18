@@ -304,7 +304,7 @@ func (c *RemoteReadCommand) stats(k *kingpin.ParseContext) error {
 
 	timeseries, err := query(context.Background())
 	if err != nil {
-		return nil
+		return err
 	}
 
 	num := struct {
