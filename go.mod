@@ -78,3 +78,7 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 // Required for Alertmanager
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+
+// Grafana SDK override. This can be removed when the SDK natively supports a dashboard -> panel -> datasource which is
+// a map, rather than a string. https://github.com/grafana-tools/sdk/pull/190
+replace github.com/grafana-tools/sdk => github.com/csmarchbanks/sdk v0.0.0-20220120205302-870d00a83f4e

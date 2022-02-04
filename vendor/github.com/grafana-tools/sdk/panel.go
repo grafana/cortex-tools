@@ -20,6 +20,7 @@ package sdk
 */
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 )
@@ -63,9 +64,9 @@ type (
 	}
 	panelType   int8
 	CommonPanel struct {
-		Datasource *string `json:"datasource,omitempty"` // metrics
-		Editable   bool    `json:"editable"`
-		Error      bool    `json:"error"`
+		Datasource interface{} `json:"datasource,omitempty"` // metrics
+		Editable   bool        `json:"editable"`
+		Error      bool        `json:"error"`
 		GridPos    struct {
 			H *int `json:"h,omitempty"`
 			W *int `json:"w,omitempty"`
@@ -133,7 +134,7 @@ type (
 		Bars        bool        `json:"bars"`
 		DashLength  *uint       `json:"dashLength,omitempty"`
 		Dashes      *bool       `json:"dashes,omitempty"`
-		Decimals    *int       `json:"decimals,omitempty"`
+		Decimals    *int        `json:"decimals,omitempty"`
 		Fill        int         `json:"fill"`
 		//		Grid        grid        `json:"grid"` obsoleted in 4.1 by xaxis and yaxis
 
@@ -160,6 +161,7 @@ type (
 		YFormats        []string         `json:"y_formats,omitempty"`
 		Xaxis           Axis             `json:"xaxis"` // was added in Grafana 4.x?
 		Yaxes           []Axis           `json:"yaxes"` // was added in Grafana 4.x?
+		FieldConfig     *FieldConfig     `json:"fieldConfig,omitempty"`
 	}
 	FieldConfig struct {
 		Defaults struct {
@@ -171,6 +173,7 @@ type (
 					Value string `json:"value"`
 				} `json:"steps"`
 			} `json:"threshold"`
+			Links []Link `json:"links,omitempty"`
 		} `json:"defaults"`
 	}
 	Options struct {
@@ -442,7 +445,7 @@ type (
 		Type            string     `json:"type"`
 		ColorMode       *string    `json:"colorMode,omitempty"`
 		Colors          *[]string  `json:"colors,omitempty"`
-		Decimals        *int      `json:"decimals,omitempty"`
+		Decimals        *int       `json:"decimals,omitempty"`
 		Thresholds      *[]string  `json:"thresholds,omitempty"`
 		Unit            *string    `json:"unit,omitempty"`
 		MappingType     int        `json:"mappingType,omitempty"`
@@ -480,9 +483,9 @@ type (
 
 // for an any panel
 type Target struct {
-	RefID      string `json:"refId"`
-	Datasource string `json:"datasource,omitempty"`
-	Hide       bool   `json:"hide,omitempty"`
+	RefID      string      `json:"refId"`
+	Datasource interface{} `json:"datasource,omitempty"`
+	Hide       bool        `json:"hide,omitempty"`
 
 	// For PostgreSQL
 	Table        string `json:"table,omitempty"`
@@ -563,7 +566,12 @@ type Target struct {
 	CrossSeriesReducer string                    `json:"crossSeriesReducer,omitempty"`
 	PerSeriesAligner   string                    `json:"perSeriesAligner,omitempty"`
 	ValueType          string                    `json:"valueType,omitempty"`
-	GroupBys           []string                  `json:"groupBys,omitempty"`
+	GroupBy            []string                  `json:"groupBy,omitempty"`
+	Tags               []struct {
+		Key      string `json:"key,omitempty"`
+		Operator string `json:"operator,omitempty"`
+		Value    string `json:"value,omitempty"`
+	} `json:"tags,omitempty"`
 }
 
 // StackdriverAlignOptions defines the list of alignment options shown in
@@ -1053,13 +1061,40 @@ func (p *Panel) MarshalJSON() ([]byte, error) {
 		}{p.CommonPanel, *p.HeatmapPanel}
 		return json.Marshal(outHeatmap)
 	case CustomType:
-		var outCustom = struct {
-			CommonPanel
-			CustomPanel
-		}{p.CommonPanel, *p.CustomPanel}
+		var outCustom = customPanelOutput{
+			p.CommonPanel,
+			*p.CustomPanel,
+		}
 		return json.Marshal(outCustom)
 	}
 	return nil, errors.New("can't marshal unknown panel type")
+}
+
+type customPanelOutput struct {
+	CommonPanel
+	CustomPanel
+}
+
+func (c customPanelOutput) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal(c.CommonPanel)
+	if err != nil {
+		return b, err
+	}
+	// Append custom keys to marshalled CommonPanel.
+	buf := bytes.NewBuffer(b[:len(b)-1])
+
+	for k, v := range c.CustomPanel {
+		buf.WriteString(`,"`)
+		buf.WriteString(k)
+		buf.WriteString(`":`)
+		b, err := json.Marshal(v)
+		if err != nil {
+			return b, err
+		}
+		buf.Write(b)
+	}
+	buf.WriteString("}")
+	return buf.Bytes(), nil
 }
 
 func incRefID(refID string) string {
