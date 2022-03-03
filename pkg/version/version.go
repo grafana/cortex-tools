@@ -15,7 +15,7 @@ var (
 )
 
 // Version defines the version for the binary, this is actually set by GoReleaser.
-var Version = "main"
+var Version = "sj/local-copy"
 
 // Template controls how the version is displayed
 var Template = fmt.Sprintf("version %s\n", Version)
