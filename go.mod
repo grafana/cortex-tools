@@ -78,3 +78,6 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 // Required for Alertmanager
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+
+// Using this to account for different panel.datasource field structure until https://github.com/grafana-tools/sdk/pull/190 is merged or superseded
+replace github.com/grafana-tools/sdk => github.com/csmarchbanks/sdk v0.0.0-20220120205302-870d00a83f4e
