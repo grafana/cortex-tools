@@ -41,12 +41,14 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 	}
 
 	for _, link := range boardLinks {
-		board, _, err := c.GetDashboardByUID(ctx, link.UID)
+		//board, _, err := c.GetDashboardByUID(ctx, link.UID)
+		_, _, err := c.GetDashboardByUID(ctx, link.UID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s for %s %s\n", err, link.UID, link.Title)
 			continue
 		}
-		analyse.ParseMetricsInBoard(output, board)
+		// TODO: convert into new board type
+		//analyse.ParseMetricsInBoard(output, board)
 	}
 
 	err = writeOut(output, cmd.outputFile)

@@ -8,7 +8,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/grafana-tools/sdk"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/promql/parser"
 )
@@ -27,15 +26,15 @@ type DashboardMetrics struct {
 	ParseErrors []string `json:"parse_errors"`
 }
 
-func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
+func ParseMetricsInBoard(mig *MetricsInGrafana, board Board) {
 	var parseErrors []error
 	metrics := make(map[string]struct{})
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
 		parseErrors = append(parseErrors, metricsFromPanel(*panel, metrics)...)
-		if panel.RowPanel != nil {
-			for _, subPanel := range panel.RowPanel.Panels {
+		if panel.Panels != nil {
+			for _, subPanel := range panel.Panels {
 				parseErrors = append(parseErrors, metricsFromPanel(subPanel, metrics)...)
 			}
 		}
@@ -77,7 +76,7 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 
 }
 
-func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{}) []error {
+func metricsFromTemplating(templating Templating, metrics map[string]struct{}) []error {
 	parseErrors := []error{}
 	for _, templateVar := range templating.List {
 		if templateVar.Type != "query" {
@@ -114,16 +113,15 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 	return parseErrors
 }
 
-func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
+func metricsFromPanel(panel Panel, metrics map[string]struct{}) []error {
 	var parseErrors []error
 
-	targets := panel.GetTargets()
-	if targets == nil {
-		parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type: %q", panel.CommonPanel.Type))
+	if panel.Targets == nil {
+		parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type: %q", panel.Type))
 		return parseErrors
 	}
 
-	for _, target := range *targets {
+	for _, target := range panel.Targets {
 		// Prometheus has this set.
 		if target.Expr == "" {
 			continue

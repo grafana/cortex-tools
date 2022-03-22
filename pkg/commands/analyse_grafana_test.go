@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/grafana-tools/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -25,7 +24,7 @@ var dashboardMetrics = []string{
 }
 
 func TestParseMetricsInBoard(t *testing.T) {
-	var board sdk.Board
+	var board analyse.Board
 	output := &analyse.MetricsInGrafana{}
 	output.OverallMetrics = make(map[string]struct{})
 
@@ -40,7 +39,7 @@ func TestParseMetricsInBoard(t *testing.T) {
 }
 
 func TestParseMetricsInBoardWithTimeseriesPanel(t *testing.T) {
-	var board sdk.Board
+	var board analyse.Board
 	output := &analyse.MetricsInGrafana{}
 	output.OverallMetrics = make(map[string]struct{})
 
