@@ -20,8 +20,8 @@ type (
 	}
 	Panel struct {
 		Targets []Target `json:"targets,omitempty"`
-		Title   string   `json:"title"`  // general
-		Panels  []Panel  `json:"panels"` //row panel
+		Title   string   `json:"title"`
+		Panels  []Panel  `json:"panels"` // row panel type
 		Type    string   `json:"type"`
 	}
 	Target struct {

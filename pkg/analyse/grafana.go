@@ -33,6 +33,7 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board Board) {
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
 		parseErrors = append(parseErrors, metricsFromPanel(*panel, metrics)...)
+		// row panel
 		if panel.Panels != nil {
 			for _, subPanel := range panel.Panels {
 				parseErrors = append(parseErrors, metricsFromPanel(subPanel, metrics)...)
@@ -99,8 +100,8 @@ func metricsFromTemplating(templating Templating, metrics map[string]struct{}) [
 			}
 			err := parseQuery(query, metrics)
 			if err != nil {
-				parseErrors = append(parseErrors, errors.Wrapf(err, "query=%v", query))
-				log.Debugln("msg", "promql parse error", "err", err, "query", query)
+				parseErrors = append(parseErrors, errors.Wrapf(err, "error parsing templating query: %v", query))
+				log.Debugln("msg", "promql parse error: templating query", "err", err, "query", query)
 				continue
 			}
 		} else {
@@ -113,11 +114,12 @@ func metricsFromTemplating(templating Templating, metrics map[string]struct{}) [
 	return parseErrors
 }
 
+// for now, only look at panels with a prometheus datasource/targets
 func metricsFromPanel(panel Panel, metrics map[string]struct{}) []error {
 	var parseErrors []error
 
 	if panel.Targets == nil {
-		parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type: %q", panel.Type))
+		parseErrors = append(parseErrors, fmt.Errorf("unsupported panel type (no targets in panel): %q", panel.Type))
 		return parseErrors
 	}
 

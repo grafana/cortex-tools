@@ -24,7 +24,13 @@ type GrafanaAnalyseCommand struct {
 }
 
 func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
-	output := &analyse.MetricsInGrafana{}
+	var (
+		boardLinks []sdk.FoundBoard
+		rawBoard   []byte
+		board      analyse.Board
+		err        error
+		output     *analyse.MetricsInGrafana
+	)
 	output.OverallMetrics = make(map[string]struct{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), cmd.readTimeout)
@@ -35,20 +41,23 @@ func (cmd *GrafanaAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	boardLinks, err := c.SearchDashboards(ctx, "", false)
+	boardLinks, err = c.SearchDashboards(ctx, "", false)
 	if err != nil {
 		return err
 	}
 
 	for _, link := range boardLinks {
-		//board, _, err := c.GetDashboardByUID(ctx, link.UID)
-		_, _, err := c.GetDashboardByUID(ctx, link.UID)
+		rawBoard, _, err = c.GetRawDashboardBySlug(ctx, link.URI)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s for %s %s\n", err, link.UID, link.Title)
+			fmt.Fprintf(os.Stderr, "%s for %s\n", err, link.URI)
 			continue
 		}
-		// TODO: convert into new board type
-		//analyse.ParseMetricsInBoard(output, board)
+
+		if err = json.Unmarshal(rawBoard, &board); err != nil {
+			fmt.Fprintf(os.Stderr, "%s for %s\n", err, link.URI)
+			continue
+		}
+		analyse.ParseMetricsInBoard(output, board)
 	}
 
 	err = writeOut(output, cmd.outputFile)
