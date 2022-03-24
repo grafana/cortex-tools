@@ -450,7 +450,7 @@ github.com/googleapis/gax-go/v2/apierror/internal/proto
 github.com/gorilla/mux
 # github.com/gosimple/slug v1.1.1
 github.com/gosimple/slug
-# github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
+# github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 ## explicit
 github.com/grafana-tools/sdk
 # github.com/grafana/dskit v0.0.0-20211103155626-4e784973d341
@@ -1169,3 +1169,4 @@ rsc.io/binaryregexp/syntax
 # github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
 # github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
 # github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+# github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
