@@ -1,3 +1,12 @@
+# Deprecated
+
+`cortextool` has been **deprecated**. Please use `mimirtool` instead:
+
+- [`mimirtool` documentation](https://grafana.com/docs/mimir/latest/operators-guide/tools/mimirtool/)
+- [`mimirtool` releases](https://github.com/grafana/mimir/releases)
+
+---
+
 # Cortex Tools
 
 This repo contains tools used for interacting with [Cortex](https://github.com/cortexproject/cortex).
