@@ -1,6 +1,6 @@
-# Deprecated
+# Be aware of new `mimirtool`
 
-`cortextool` has been **deprecated**. Please use `mimirtool` instead:
+If you're using this tool with Grafana Mimir, please use the new `mimirtool` instead:
 
 - [`mimirtool` documentation](https://grafana.com/docs/mimir/latest/operators-guide/tools/mimirtool/)
 - [`mimirtool` releases](https://github.com/grafana/mimir/releases)
