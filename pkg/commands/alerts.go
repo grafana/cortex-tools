@@ -65,6 +65,7 @@ func (a *AlertmanagerCommand) Register(app *kingpin.Application) {
 	alertCmd := app.Command("alertmanager", "View & edit alertmanager configs stored in cortex.").PreAction(a.setup)
 	alertCmd.Flag("address", "Address of the cortex cluster, alternatively set CORTEX_ADDRESS.").Envar("CORTEX_ADDRESS").Required().StringVar(&a.ClientConfig.Address)
 	alertCmd.Flag("id", "Cortex tenant id, alternatively set CORTEX_TENANT_ID.").Envar("CORTEX_TENANT_ID").Required().StringVar(&a.ClientConfig.ID)
+	alertCmd.Flag("authToken", "Authentication token for bearer token or JWT auth, alternatively set CORTEX_AUTH_TOKEN.").Default("").Envar("CORTEX_AUTH_TOKEN").StringVar(&a.ClientConfig.AuthToken)
 	alertCmd.Flag("user", "API user to use when contacting cortex, alternatively set CORTEX_API_USER. If empty, CORTEX_TENANT_ID will be used instead.").Default("").Envar("CORTEX_API_USER").StringVar(&a.ClientConfig.User)
 	alertCmd.Flag("key", "API key to use when contacting cortex, alternatively set CORTEX_API_KEY.").Default("").Envar("CORTEX_API_KEY").StringVar(&a.ClientConfig.Key)
 	alertCmd.Flag("tls-ca-path", "TLS CA certificate to verify cortex API as part of mTLS, alternatively set CORTEX_TLS_CA_PATH.").Default("").Envar("CORTEX_TLS_CA_PATH").StringVar(&a.ClientConfig.TLS.CAPath)
@@ -143,6 +144,7 @@ func (a *AlertCommand) Register(app *kingpin.Application) {
 	alertCmd := app.Command("alerts", "View active alerts in alertmanager.").PreAction(a.setup)
 	alertCmd.Flag("address", "Address of the cortex cluster, alternatively set CORTEX_ADDRESS.").Envar("CORTEX_ADDRESS").Required().StringVar(&a.ClientConfig.Address)
 	alertCmd.Flag("id", "Cortex tenant id, alternatively set CORTEX_TENANT_ID.").Envar("CORTEX_TENANT_ID").Required().StringVar(&a.ClientConfig.ID)
+	alertCmd.Flag("authToken", "Authentication token for bearer token or JWT auth, alternatively set CORTEX_AUTH_TOKEN.").Default("").Envar("CORTEX_AUTH_TOKEN").StringVar(&a.ClientConfig.AuthToken)
 	alertCmd.Flag("user", "API user to use when contacting cortex, alternatively set CORTEX_API_USER. If empty, CORTEX_TENANT_ID will be used instead.").Default("").Envar("CORTEX_API_USER").StringVar(&a.ClientConfig.User)
 	alertCmd.Flag("key", "API key to use when contacting cortex, alternatively set CORTEX_API_KEY.").Default("").Envar("CORTEX_API_KEY").StringVar(&a.ClientConfig.Key)
 

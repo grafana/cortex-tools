@@ -42,7 +42,6 @@ github.com/Masterminds/goutils
 # github.com/Masterminds/semver/v3 v3.1.1
 github.com/Masterminds/semver/v3
 # github.com/Masterminds/sprig/v3 v3.2.2
-## explicit
 github.com/Masterminds/sprig/v3
 # github.com/Masterminds/squirrel v0.0.0-20161115235646-20f192218cf5
 github.com/Masterminds/squirrel
@@ -100,8 +99,6 @@ github.com/armon/go-metrics
 github.com/armon/go-metrics/prometheus
 # github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef
 github.com/asaskevich/govalidator
-# github.com/aws/aws-lambda-go v1.17.0
-## explicit
 # github.com/aws/aws-sdk-go v1.40.45 => github.com/aws/aws-sdk-go v1.40.37
 github.com/aws/aws-sdk-go/aws
 github.com/aws/aws-sdk-go/aws/arn
@@ -294,8 +291,6 @@ github.com/dlclark/regexp2
 github.com/dlclark/regexp2/syntax
 # github.com/docker/go-units v0.4.0
 github.com/docker/go-units
-# github.com/drone/envsubst v1.0.2
-## explicit
 # github.com/dustin/go-humanize v1.0.0
 github.com/dustin/go-humanize
 # github.com/edsrzf/mmap-go v1.0.0
@@ -455,7 +450,7 @@ github.com/googleapis/gax-go/v2/apierror/internal/proto
 github.com/gorilla/mux
 # github.com/gosimple/slug v1.1.1
 github.com/gosimple/slug
-# github.com/grafana-tools/sdk v0.0.0-20210808170449-9de4d14888c5
+# github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 ## explicit
 github.com/grafana-tools/sdk
 # github.com/grafana/dskit v0.0.0-20211103155626-4e784973d341
@@ -513,8 +508,6 @@ github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors
 github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/tags
 github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/tracing
 github.com/grpc-ecosystem/go-grpc-middleware/v2/util/metautils
-# github.com/grpc-ecosystem/go-grpc-prometheus v1.2.1-0.20191002090509-6af20e3a5340
-## explicit
 # github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
 github.com/hailocab/go-hostpool
 # github.com/hashicorp/consul/api v1.10.1
@@ -546,10 +539,6 @@ github.com/hashicorp/serf/coordinate
 github.com/huandu/xstrings
 # github.com/imdario/mergo v0.3.11
 github.com/imdario/mergo
-# github.com/influxdata/go-syslog/v3 v3.0.1-0.20201128200927-a1889d947b48
-## explicit
-# github.com/influxdata/telegraf v1.16.3
-## explicit
 # github.com/jessevdk/go-flags v1.5.0
 github.com/jessevdk/go-flags
 # github.com/jmespath/go-jmespath v0.4.0
@@ -564,8 +553,6 @@ github.com/json-iterator/go
 github.com/julienschmidt/httprouter
 # github.com/klauspost/cpuid v1.3.1
 github.com/klauspost/cpuid
-# github.com/klauspost/pgzip v1.2.5
-## explicit
 # github.com/lann/builder v0.0.0-20180802200727-47ae307949d0
 github.com/lann/builder
 # github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0
@@ -929,8 +916,6 @@ go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/propagation
 go.opencensus.io/trace/tracestate
-# go.opentelemetry.io/otel v0.20.0
-## explicit
 # go.uber.org/atomic v1.9.0
 ## explicit
 go.uber.org/atomic
@@ -1184,3 +1169,4 @@ rsc.io/binaryregexp/syntax
 # github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
 # github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
 # github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+# github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f

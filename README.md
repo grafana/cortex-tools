@@ -1,13 +1,22 @@
+# Be aware of new `mimirtool`
+
+If you're using this tool with Grafana Mimir, please use the new `mimirtool` instead:
+
+- [`mimirtool` documentation](https://grafana.com/docs/mimir/latest/operators-guide/tools/mimirtool/)
+- [`mimirtool` releases](https://github.com/grafana/mimir/releases)
+
+---
+
 # Cortex Tools
 
 This repo contains tools used for interacting with [Cortex](https://github.com/cortexproject/cortex).
 
 * [benchtool](docs/benchtool.md): A powerful YAML driven tool for benchmarking
   Cortex write and query API.
-* [cortextool](#cortextool): Interacts with user-facing Cortex APIs and backend storage components
+* [cortextool](#cortextool): Interacts with user-facing Cortex APIs and backend storage components.
 * [chunktool](#chunktool): Interacts with chunks stored and indexed in Cortex storage backends.
 * [logtool](#logtool): Tool which parses Cortex query-frontend logs and formats them for easy analysis.
-* [e2ealerting](docs/e2ealerting.md): Tool that helps measure how long an alerts takes from scrape of sample to Alertmanager notifcation delivery.
+* [e2ealerting](docs/e2ealerting.md): Tool that helps measure how long an alert takes from scrape of sample to Alertmanager notification delivery.
 
 
 # Installation
@@ -32,16 +41,17 @@ This tool is designed to interact with the various user-facing APIs provided by 
 
 ### Config Commands
 
-Config commands interact with the Cortex api and read/create/update/delete user configs from Cortex. Specifically a users alertmanager and rule configs can be composed and updated using these commands.
+Config commands interact with the Cortex api and read/create/update/delete user configs from Cortex. Specifically, a user's alertmanager and rule configs can be composed and updated using these commands.
 
 #### Configuration
 
-| Env Variables     | Flag      | Description                                                                                                   |
-| ----------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
-| CORTEX_ADDRESS    | `address` | Address of the API of the desired Cortex cluster.                                                              |
-| CORTEX_API_USER   | `user`    | In cases where the Cortex API is set behind a basic auth gateway, a user can be set as a basic auth user. If empty and CORTEX_API_KEY is set, CORTEX_TENANT_ID will be used instead. |
-| CORTEX_API_KEY    | `key`     | In cases where the Cortex API is set behind a basic auth gateway, a key can be set as a basic auth password. |
-| CORTEX_TENANT_ID | `id`      | The tenant ID of the Cortex instance to interact with.                                                        |
+| Env Variables     | Flag       | Description                                                                                                   |
+| ----------------- | ---------  | ------------------------------------------------------------------------------------------------------------- |
+| CORTEX_ADDRESS    | `address`  | Address of the API of the desired Cortex cluster.                                                              |
+| CORTEX_API_USER   | `user`     | In cases where the Cortex API is set behind a basic auth gateway, a user can be set as a basic auth user. If empty and CORTEX_API_KEY is set, CORTEX_TENANT_ID will be used instead. |
+| CORTEX_API_KEY    | `key`      | In cases where the Cortex API is set behind a basic auth gateway, a key can be set as a basic auth password. |
+| CORTEX_AUTH_TOKEN | `authToken`| In cases where the Cortex API is set behind gateway authenticating by bearer token, a token can be set as a bearer token header. |
+| CORTEX_TENANT_ID  | `id`       | The tenant ID of the Cortex instance to interact with.                                                        |
 
 #### Alertmanager
 
@@ -87,7 +97,7 @@ This command will delete the specified rule group from the specified namespace.
 
 ##### Rules Load
 
-This command will load each rule group in the specified files and load them into Cortex. If a rule already exists in Cortex it will be overwritten if a diff is found.
+This command will load each rule group in the specified files and load them into Cortex. If a rule already exists in Cortex it will be overwritten, if a diff is found.
 
     cortextool rules load ./example_rules_one.yaml ./example_rules_two.yaml  ...
 
@@ -105,7 +115,7 @@ This command prepares a rules file for upload to Cortex. It lints all your PromQ
 
 There are two flags of note for this command:
 - `-i` which allows you to edit in place, otherwise a a new file with a `.output` extension is created with the results of the run.
-- `-l` which allows you specify the label you want you add for your aggregations, it is `cluster` by default.
+- `-l` which allows you to specify the label you want to add for your aggregations, which is `cluster` by default.
 
 At the end of the run, the command tells you whenever the operation was a success in the form of
 
@@ -122,7 +132,7 @@ This commands checks rules against the recommended [best practices](https://prom
 
 #### Remote Read
 
-Cortex exposes a [Remote Read API] which allows access to the stored series. The `remote-read` subcommand of `cortextool` allows to interact with its API, to find out which series are stored.
+Cortex exposes a [Remote Read API] which allows access to the stored series. The `remote-read` subcommand of `cortextool` allows interacting with its API, to find out which series are stored.
 
 [Remote Read API]: https://prometheus.io/docs/prometheus/latest/storage/#remote-storage-integrations
 
@@ -177,7 +187,7 @@ prometheus --storage.tsdb.path ./local-tsdb --config.file=<(echo "")
 
 #### Overrides Exporter
 
-The Overrides Exporter allows to continuously export [per tenant configuration overrides][runtime-config] as metrics. Optionally it can also export a presets file (cf. example [override config file] and [presets file]).
+The Overrides Exporter allows to continuously export [per tenant configuration overrides][runtime-config] as metrics. It can also, optionally, export a presets file (cf. example [override config file] and [presets file]).
 
     cortextool overrides-exporter --overrides-file overrides.yaml --presets-file presets.yaml
 
@@ -386,7 +396,7 @@ The delete command currently cleans all index entries pointing to chunks in the 
 
 The migrate command helps with migrating chunks across cortex clusters. It also takes care of setting right index in the new cluster as per the specified schema config.
 
-As of now it only supports `Bigtable` or `GCS` as a source to read chunks from for migration while for writing it supports all the storages that Cortex supports.
+As of now it only supports `Bigtable` or `GCS` as a source to read chunks from for migration.  For writing it supports all the storages that Cortex supports.
 More details about it [here](./pkg/chunk/migrate/README.md)
 
 ##### Chunk Validate/Clean-Index

@@ -5,14 +5,11 @@ go 1.16
 require (
 	cloud.google.com/go/bigtable v1.3.0
 	cloud.google.com/go/storage v1.10.0
-	github.com/Masterminds/sprig/v3 v3.2.2 // indirect
 	github.com/alecthomas/chroma v0.7.0
 	github.com/alecthomas/repr v0.0.0-20181024024818-d37bc2a10ba1 // indirect
 	github.com/alecthomas/units v0.0.0-20210912230133-d1bdfacee922
-	github.com/aws/aws-lambda-go v1.17.0 // indirect
 	github.com/cortexproject/cortex v1.10.1-0.20211104100946-3f329a21cad4
 	github.com/dlclark/regexp2 v1.2.0 // indirect
-	github.com/drone/envsubst v1.0.2 // indirect
 	github.com/go-kit/kit v0.12.0
 	github.com/gocql/gocql v0.0.0-20200526081602-cd04bd7f22a7
 	github.com/gogo/protobuf v1.3.2
@@ -26,13 +23,9 @@ require (
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b
 	github.com/google/go-github/v32 v32.1.0
 	github.com/gorilla/mux v1.8.0
-	github.com/grafana-tools/sdk v0.0.0-20210808170449-9de4d14888c5
+	github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
 	github.com/grafana/dskit v0.0.0-20211103155626-4e784973d341
 	github.com/grafana/loki v1.6.2-0.20211108134117-5b9f5b9efaa5
-	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.1-0.20191002090509-6af20e3a5340 // indirect
-	github.com/influxdata/go-syslog/v3 v3.0.1-0.20201128200927-a1889d947b48 // indirect
-	github.com/influxdata/telegraf v1.16.3 // indirect
-	github.com/klauspost/pgzip v1.2.5 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/oklog/ulid v1.3.1
 	github.com/opentracing-contrib/go-stdlib v1.0.0
@@ -46,7 +39,6 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/thanos-io/thanos v0.22.0
 	github.com/weaveworks/common v0.0.0-20211015155308-ebe5bdc2c89e
-	go.opentelemetry.io/otel v0.20.0 // indirect
 	go.uber.org/atomic v1.9.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	google.golang.org/api v0.57.0
@@ -58,7 +50,9 @@ require (
 
 // Cortex Overrides
 replace git.apache.org/thrift.git => github.com/apache/thrift v0.0.0-20180902110319-2566ecd5d999
+
 replace github.com/aws/aws-sdk-go => github.com/aws/aws-sdk-go v1.40.37
+
 replace github.com/thanos-io/thanos v0.22.0 => github.com/thanos-io/thanos v0.19.1-0.20210923155558-c15594a03c45
 
 // Thanos Override
@@ -78,3 +72,5 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 // Required for Alertmanager
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
+
+replace github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
