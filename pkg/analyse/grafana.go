@@ -24,12 +24,18 @@ type DashboardMetrics struct {
 	UID         string   `json:"uid,omitempty"`
 	Title       string   `json:"title"`
 	Metrics     []string `json:"metrics"`
+	LabelsByMetric map[string][]Label `json:"labels_by_metric"`
 	ParseErrors []string `json:"parse_errors"`
+}
+
+type Label struct {
+	Name string
+	Value string
 }
 
 func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 	var parseErrors []error
-	metrics := make(map[string]struct{})
+	metrics := make(map[string][]Label)
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
@@ -73,11 +79,12 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 		Title:       board.Title,
 		Metrics:     metricsInBoard,
 		ParseErrors: parseErrs,
+		LabelsByMetric: metrics,
 	})
 
 }
 
-func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{}) []error {
+func metricsFromTemplating(templating sdk.Templating, metrics map[string][]Label) []error {
 	parseErrors := []error{}
 	for _, templateVar := range templating.List {
 		if templateVar.Type != "query" {
@@ -114,7 +121,7 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 	return parseErrors
 }
 
-func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
+func metricsFromPanel(panel sdk.Panel, metrics map[string][]Label) []error {
 	var parseErrors []error
 
 	targets := panel.GetTargets()
@@ -140,7 +147,7 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 	return parseErrors
 }
 
-func parseQuery(query string, metrics map[string]struct{}) error {
+func parseQuery(query string, metrics map[string][]Label) error {
 	query = strings.ReplaceAll(query, `$__interval`, "5m")
 	query = strings.ReplaceAll(query, `$interval`, "5m")
 	query = strings.ReplaceAll(query, `$resolution`, "5s")
@@ -155,7 +162,15 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
 		if n, ok := node.(*parser.VectorSelector); ok {
-			metrics[n.Name] = struct{}{}
+			var labels []Label
+			for _, l := range n.LabelMatchers {
+				labels = append(
+					labels,
+					Label{Name: l.Name, Value: l.Value},
+					)
+			}
+			metrics[n.Name] = labels
+
 		}
 
 		return nil
