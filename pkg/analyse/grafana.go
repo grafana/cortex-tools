@@ -20,16 +20,16 @@ type MetricsInGrafana struct {
 }
 
 type DashboardMetrics struct {
-	Slug        string   `json:"slug"`
-	UID         string   `json:"uid,omitempty"`
-	Title       string   `json:"title"`
-	Metrics     []string `json:"metrics"`
+	Slug           string             `json:"slug"`
+	UID            string             `json:"uid,omitempty"`
+	Title          string             `json:"title"`
+	Metrics        []string           `json:"metrics"`
 	LabelsByMetric map[string][]Label `json:"labels_by_metric"`
-	ParseErrors []string `json:"parse_errors"`
+	ParseErrors    []string           `json:"parse_errors"`
 }
 
 type Label struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
@@ -74,11 +74,11 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 	sort.Strings(metricsInBoard)
 
 	mig.Dashboards = append(mig.Dashboards, DashboardMetrics{
-		Slug:        board.Slug,
-		UID:         board.UID,
-		Title:       board.Title,
-		Metrics:     metricsInBoard,
-		ParseErrors: parseErrs,
+		Slug:           board.Slug,
+		UID:            board.UID,
+		Title:          board.Title,
+		Metrics:        metricsInBoard,
+		ParseErrors:    parseErrs,
 		LabelsByMetric: metrics,
 	})
 
@@ -167,7 +167,7 @@ func parseQuery(query string, metrics map[string][]Label) error {
 				labels = append(
 					labels,
 					Label{Name: l.Name, Value: l.Value},
-					)
+				)
 			}
 			metrics[n.Name] = labels
 
