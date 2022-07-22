@@ -20,22 +20,17 @@ type MetricsInGrafana struct {
 }
 
 type DashboardMetrics struct {
-	Slug           string             `json:"slug"`
-	UID            string             `json:"uid,omitempty"`
-	Title          string             `json:"title"`
-	Metrics        []string           `json:"metrics"`
-	LabelsByMetric map[string][]Label `json:"labels_by_metric"`
-	ParseErrors    []string           `json:"parse_errors"`
-}
-
-type Label struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Slug           string              `json:"slug"`
+	UID            string              `json:"uid,omitempty"`
+	Title          string              `json:"title"`
+	Metrics        []string            `json:"metrics"`
+	LabelsByMetric map[string][]string `json:"labels_by_metric"`
+	ParseErrors    []string            `json:"parse_errors"`
 }
 
 func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 	var parseErrors []error
-	metrics := make(map[string][]Label)
+	metrics := make(map[string][]string)
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
@@ -84,8 +79,8 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 
 }
 
-func metricsFromTemplating(templating sdk.Templating, metrics map[string][]Label) []error {
-	parseErrors := []error{}
+func metricsFromTemplating(templating sdk.Templating, metrics map[string][]string) []error {
+	var parseErrors []error
 	for _, templateVar := range templating.List {
 		if templateVar.Type != "query" {
 			continue
@@ -121,7 +116,7 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string][]Label
 	return parseErrors
 }
 
-func metricsFromPanel(panel sdk.Panel, metrics map[string][]Label) []error {
+func metricsFromPanel(panel sdk.Panel, metrics map[string][]string) []error {
 	var parseErrors []error
 
 	targets := panel.GetTargets()
@@ -147,7 +142,7 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string][]Label) []error {
 	return parseErrors
 }
 
-func parseQuery(query string, metrics map[string][]Label) error {
+func parseQuery(query string, metrics map[string][]string) error {
 	query = strings.ReplaceAll(query, `$__interval`, "5m")
 	query = strings.ReplaceAll(query, `$interval`, "5m")
 	query = strings.ReplaceAll(query, `$resolution`, "5s")
@@ -161,12 +156,17 @@ func parseQuery(query string, metrics map[string][]Label) error {
 	}
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
+		var labels []string
+
 		if n, ok := node.(*parser.VectorSelector); ok {
-			var labels []Label
 			for _, l := range n.LabelMatchers {
+				// ignore meta label __name__
+				if l.Name == "__name__" {
+					continue
+				}
 				labels = append(
 					labels,
-					Label{Name: l.Name, Value: l.Value},
+					l.Name,
 				)
 			}
 			metrics[n.Name] = labels
