@@ -72,7 +72,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 	cfg.RingConfig.KVStore.MemberlistKV = r.MemberlistKV.GetMemberlistKV
 
 	var err error
-	r.Ring, err = ring.New(cfg.RingConfig, "ingester", ring.IngesterRingKey, logger, reg)
+	r.Ring, err = ring.New(cfg.RingConfig, "ingester", "ring", logger, reg)
 	if err != nil {
 		return nil, err
 	}

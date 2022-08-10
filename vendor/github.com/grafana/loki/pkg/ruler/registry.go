@@ -14,9 +14,9 @@ import (
 	promConfig "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/pkg/exemplar"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/relabel"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/weaveworks/common/user"
 	"gopkg.in/yaml.v2"
@@ -229,7 +229,6 @@ func (r *walRegistry) getTenantRemoteWriteConfig(tenant string, base RemoteWrite
 	// TODO(dannyk): configure HTTP client overrides
 	// metadata is only used by prometheus scrape configs
 	overrides.Client.MetadataConfig = config.MetadataConfig{Send: false}
-	overrides.Client.SigV4Config = nil
 
 	if r.overrides.RulerRemoteWriteDisabled(tenant) {
 		overrides.Enabled = false
@@ -296,6 +295,10 @@ func (r *walRegistry) getTenantRemoteWriteConfig(tenant string, base RemoteWrite
 		overrides.Client.QueueConfig.RetryOnRateLimit = v
 	}
 
+	if v := r.overrides.RulerRemoteWriteSigV4Config(tenant); v != nil {
+		overrides.Client.SigV4Config = v
+	}
+
 	return overrides, nil
 }
 
@@ -332,10 +335,10 @@ var errNotReady = errors.New("appender not ready")
 
 type notReadyAppender struct{}
 
-func (n notReadyAppender) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+func (n notReadyAppender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	return 0, errNotReady
 }
-func (n notReadyAppender) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
+func (n notReadyAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
 	return 0, errNotReady
 }
 func (n notReadyAppender) Commit() error   { return errNotReady }
@@ -343,10 +346,10 @@ func (n notReadyAppender) Rollback() error { return errNotReady }
 
 type discardingAppender struct{}
 
-func (n discardingAppender) Append(ref uint64, l labels.Labels, t int64, v float64) (uint64, error) {
+func (n discardingAppender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	return 0, nil
 }
-func (n discardingAppender) AppendExemplar(ref uint64, l labels.Labels, e exemplar.Exemplar) (uint64, error) {
+func (n discardingAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
 	return 0, nil
 }
 func (n discardingAppender) Commit() error   { return nil }

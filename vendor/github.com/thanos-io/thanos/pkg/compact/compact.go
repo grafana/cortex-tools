@@ -14,23 +14,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/tsdb"
-	"github.com/thanos-io/thanos/pkg/extprom"
-	"github.com/thanos-io/thanos/pkg/runutil"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"github.com/thanos-io/thanos/pkg/errutil"
+	"github.com/thanos-io/thanos/pkg/extprom"
 	"github.com/thanos-io/thanos/pkg/objstore"
+	"github.com/thanos-io/thanos/pkg/runutil"
+	"github.com/thanos-io/thanos/pkg/tracing"
 )
 
 type ResolutionLevel int64
@@ -57,7 +59,6 @@ type Syncer struct {
 	mtx                      sync.Mutex
 	blocks                   map[ulid.ULID]*metadata.Meta
 	partial                  map[ulid.ULID]error
-	blockSyncConcurrency     int
 	metrics                  *syncerMetrics
 	duplicateBlocksFilter    *block.DeduplicateFilter
 	ignoreDeletionMarkFilter *block.IgnoreDeletionMarkFilter
@@ -96,7 +97,7 @@ func newSyncerMetrics(reg prometheus.Registerer, blocksMarkedForDeletion, garbag
 
 // NewMetaSyncer returns a new Syncer for the given Bucket and directory.
 // Blocks must be at least as old as the sync delay for being considered.
-func NewMetaSyncer(logger log.Logger, reg prometheus.Registerer, bkt objstore.Bucket, fetcher block.MetadataFetcher, duplicateBlocksFilter *block.DeduplicateFilter, ignoreDeletionMarkFilter *block.IgnoreDeletionMarkFilter, blocksMarkedForDeletion, garbageCollectedBlocks prometheus.Counter, blockSyncConcurrency int) (*Syncer, error) {
+func NewMetaSyncer(logger log.Logger, reg prometheus.Registerer, bkt objstore.Bucket, fetcher block.MetadataFetcher, duplicateBlocksFilter *block.DeduplicateFilter, ignoreDeletionMarkFilter *block.IgnoreDeletionMarkFilter, blocksMarkedForDeletion, garbageCollectedBlocks prometheus.Counter) (*Syncer, error) {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -109,7 +110,6 @@ func NewMetaSyncer(logger log.Logger, reg prometheus.Registerer, bkt objstore.Bu
 		metrics:                  newSyncerMetrics(reg, blocksMarkedForDeletion, garbageCollectedBlocks),
 		duplicateBlocksFilter:    duplicateBlocksFilter,
 		ignoreDeletionMarkFilter: ignoreDeletionMarkFilter,
-		blockSyncConcurrency:     blockSyncConcurrency,
 	}, nil
 }
 
@@ -121,9 +121,9 @@ func UntilNextDownsampling(m *metadata.Meta) (time.Duration, error) {
 	case downsample.ResLevel2:
 		return time.Duration(0), errors.New("no downsampling")
 	case downsample.ResLevel1:
-		return time.Duration(downsample.DownsampleRange1*time.Millisecond) - timeRange, nil
+		return time.Duration(downsample.ResLevel2DownsampleRange*time.Millisecond) - timeRange, nil
 	case downsample.ResLevel0:
-		return time.Duration(downsample.DownsampleRange0*time.Millisecond) - timeRange, nil
+		return time.Duration(downsample.ResLevel1DownsampleRange*time.Millisecond) - timeRange, nil
 	default:
 		panic(errors.Errorf("invalid resolution %v", m.Thanos.Downsample.Resolution))
 	}
@@ -216,32 +216,24 @@ type Grouper interface {
 	Groups(blocks map[ulid.ULID]*metadata.Meta) (res []*Group, err error)
 }
 
-// DefaultGroupKey returns a unique identifier for the group the block belongs to, based on
-// the DefaultGrouper logic. It considers the downsampling resolution and the block's labels.
-func DefaultGroupKey(meta metadata.Thanos) string {
-	return defaultGroupKey(meta.Downsample.Resolution, labels.FromMap(meta.Labels))
-}
-
-func defaultGroupKey(res int64, lbls labels.Labels) string {
-	return fmt.Sprintf("%d@%v", res, lbls.Hash())
-}
-
 // DefaultGrouper is the Thanos built-in grouper. It groups blocks based on downsample
 // resolution and block's labels.
 type DefaultGrouper struct {
-	bkt                      objstore.Bucket
-	logger                   log.Logger
-	acceptMalformedIndex     bool
-	enableVerticalCompaction bool
-	compactions              *prometheus.CounterVec
-	compactionRunsStarted    *prometheus.CounterVec
-	compactionRunsCompleted  *prometheus.CounterVec
-	compactionFailures       *prometheus.CounterVec
-	verticalCompactions      *prometheus.CounterVec
-	garbageCollectedBlocks   prometheus.Counter
-	blocksMarkedForDeletion  prometheus.Counter
-	blocksMarkedForNoCompact prometheus.Counter
-	hashFunc                 metadata.HashFunc
+	bkt                           objstore.Bucket
+	logger                        log.Logger
+	acceptMalformedIndex          bool
+	enableVerticalCompaction      bool
+	compactions                   *prometheus.CounterVec
+	compactionRunsStarted         *prometheus.CounterVec
+	compactionRunsCompleted       *prometheus.CounterVec
+	compactionFailures            *prometheus.CounterVec
+	verticalCompactions           *prometheus.CounterVec
+	garbageCollectedBlocks        prometheus.Counter
+	blocksMarkedForDeletion       prometheus.Counter
+	blocksMarkedForNoCompact      prometheus.Counter
+	hashFunc                      metadata.HashFunc
+	blockFilesConcurrency         int
+	compactBlocksFetchConcurrency int
 }
 
 // NewDefaultGrouper makes a new DefaultGrouper.
@@ -255,6 +247,8 @@ func NewDefaultGrouper(
 	garbageCollectedBlocks prometheus.Counter,
 	blocksMarkedForNoCompact prometheus.Counter,
 	hashFunc metadata.HashFunc,
+	blockFilesConcurrency int,
+	compactBlocksFetchConcurrency int,
 ) *DefaultGrouper {
 	return &DefaultGrouper{
 		bkt:                      bkt,
@@ -281,10 +275,12 @@ func NewDefaultGrouper(
 			Name: "thanos_compact_group_vertical_compactions_total",
 			Help: "Total number of group compaction attempts that resulted in a new block based on overlapping blocks.",
 		}, []string{"group"}),
-		blocksMarkedForNoCompact: blocksMarkedForNoCompact,
-		garbageCollectedBlocks:   garbageCollectedBlocks,
-		blocksMarkedForDeletion:  blocksMarkedForDeletion,
-		hashFunc:                 hashFunc,
+		blocksMarkedForNoCompact:      blocksMarkedForNoCompact,
+		garbageCollectedBlocks:        garbageCollectedBlocks,
+		blocksMarkedForDeletion:       blocksMarkedForDeletion,
+		hashFunc:                      hashFunc,
+		blockFilesConcurrency:         blockFilesConcurrency,
+		compactBlocksFetchConcurrency: compactBlocksFetchConcurrency,
 	}
 }
 
@@ -293,7 +289,7 @@ func NewDefaultGrouper(
 func (g *DefaultGrouper) Groups(blocks map[ulid.ULID]*metadata.Meta) (res []*Group, err error) {
 	groups := map[string]*Group{}
 	for _, m := range blocks {
-		groupKey := DefaultGroupKey(m.Thanos)
+		groupKey := m.Thanos.GroupKey()
 		group, ok := groups[groupKey]
 		if !ok {
 			lbls := labels.FromMap(m.Thanos.Labels)
@@ -314,6 +310,8 @@ func (g *DefaultGrouper) Groups(blocks map[ulid.ULID]*metadata.Meta) (res []*Gro
 				g.blocksMarkedForDeletion,
 				g.blocksMarkedForNoCompact,
 				g.hashFunc,
+				g.blockFilesConcurrency,
+				g.compactBlocksFetchConcurrency,
 			)
 			if err != nil {
 				return nil, errors.Wrap(err, "create compaction group")
@@ -334,24 +332,26 @@ func (g *DefaultGrouper) Groups(blocks map[ulid.ULID]*metadata.Meta) (res []*Gro
 // Group captures a set of blocks that have the same origin labels and downsampling resolution.
 // Those blocks generally contain the same series and can thus efficiently be compacted.
 type Group struct {
-	logger                      log.Logger
-	bkt                         objstore.Bucket
-	key                         string
-	labels                      labels.Labels
-	resolution                  int64
-	mtx                         sync.Mutex
-	metasByMinTime              []*metadata.Meta
-	acceptMalformedIndex        bool
-	enableVerticalCompaction    bool
-	compactions                 prometheus.Counter
-	compactionRunsStarted       prometheus.Counter
-	compactionRunsCompleted     prometheus.Counter
-	compactionFailures          prometheus.Counter
-	verticalCompactions         prometheus.Counter
-	groupGarbageCollectedBlocks prometheus.Counter
-	blocksMarkedForDeletion     prometheus.Counter
-	blocksMarkedForNoCompact    prometheus.Counter
-	hashFunc                    metadata.HashFunc
+	logger                        log.Logger
+	bkt                           objstore.Bucket
+	key                           string
+	labels                        labels.Labels
+	resolution                    int64
+	mtx                           sync.Mutex
+	metasByMinTime                []*metadata.Meta
+	acceptMalformedIndex          bool
+	enableVerticalCompaction      bool
+	compactions                   prometheus.Counter
+	compactionRunsStarted         prometheus.Counter
+	compactionRunsCompleted       prometheus.Counter
+	compactionFailures            prometheus.Counter
+	verticalCompactions           prometheus.Counter
+	groupGarbageCollectedBlocks   prometheus.Counter
+	blocksMarkedForDeletion       prometheus.Counter
+	blocksMarkedForNoCompact      prometheus.Counter
+	hashFunc                      metadata.HashFunc
+	blockFilesConcurrency         int
+	compactBlocksFetchConcurrency int
 }
 
 // NewGroup returns a new compaction group.
@@ -372,27 +372,36 @@ func NewGroup(
 	blocksMarkedForDeletion prometheus.Counter,
 	blocksMarkedForNoCompact prometheus.Counter,
 	hashFunc metadata.HashFunc,
+	blockFilesConcurrency int,
+	compactBlocksFetchConcurrency int,
 ) (*Group, error) {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
+
+	if blockFilesConcurrency <= 0 {
+		return nil, errors.Errorf("invalid concurrency level (%d), blockFilesConcurrency level must be > 0", blockFilesConcurrency)
+	}
+
 	g := &Group{
-		logger:                      logger,
-		bkt:                         bkt,
-		key:                         key,
-		labels:                      lset,
-		resolution:                  resolution,
-		acceptMalformedIndex:        acceptMalformedIndex,
-		enableVerticalCompaction:    enableVerticalCompaction,
-		compactions:                 compactions,
-		compactionRunsStarted:       compactionRunsStarted,
-		compactionRunsCompleted:     compactionRunsCompleted,
-		compactionFailures:          compactionFailures,
-		verticalCompactions:         verticalCompactions,
-		groupGarbageCollectedBlocks: groupGarbageCollectedBlocks,
-		blocksMarkedForDeletion:     blocksMarkedForDeletion,
-		blocksMarkedForNoCompact:    blocksMarkedForNoCompact,
-		hashFunc:                    hashFunc,
+		logger:                        logger,
+		bkt:                           bkt,
+		key:                           key,
+		labels:                        lset,
+		resolution:                    resolution,
+		acceptMalformedIndex:          acceptMalformedIndex,
+		enableVerticalCompaction:      enableVerticalCompaction,
+		compactions:                   compactions,
+		compactionRunsStarted:         compactionRunsStarted,
+		compactionRunsCompleted:       compactionRunsCompleted,
+		compactionFailures:            compactionFailures,
+		verticalCompactions:           verticalCompactions,
+		groupGarbageCollectedBlocks:   groupGarbageCollectedBlocks,
+		blocksMarkedForDeletion:       blocksMarkedForDeletion,
+		blocksMarkedForNoCompact:      blocksMarkedForNoCompact,
+		hashFunc:                      hashFunc,
+		blockFilesConcurrency:         blockFilesConcurrency,
+		compactBlocksFetchConcurrency: compactBlocksFetchConcurrency,
 	}
 	return g, nil
 }
@@ -400,6 +409,19 @@ func NewGroup(
 // Key returns an identifier for the group.
 func (cg *Group) Key() string {
 	return cg.key
+}
+
+func (cg *Group) deleteFromGroup(target map[ulid.ULID]struct{}) {
+	cg.mtx.Lock()
+	defer cg.mtx.Unlock()
+	var newGroupMeta []*metadata.Meta
+	for _, meta := range cg.metasByMinTime {
+		if _, found := target[meta.BlockMeta.ULID]; !found {
+			newGroupMeta = append(newGroupMeta, meta)
+		}
+	}
+
+	cg.metasByMinTime = newGroupMeta
 }
 
 // AppendMeta the block with the given meta to the group.
@@ -470,6 +492,239 @@ func (cg *Group) Resolution() int64 {
 	return cg.resolution
 }
 
+// CompactProgressMetrics contains Prometheus metrics related to compaction progress.
+type CompactProgressMetrics struct {
+	NumberOfCompactionRuns   *prometheus.GaugeVec
+	NumberOfCompactionBlocks *prometheus.GaugeVec
+}
+
+// ProgressCalculator calculates the progress of the compaction process for a given slice of Groups.
+type ProgressCalculator interface {
+	ProgressCalculate(ctx context.Context, groups []*Group) error
+}
+
+// CompactionProgressCalculator contains a planner and ProgressMetrics, which are updated during the compaction simulation process.
+type CompactionProgressCalculator struct {
+	planner Planner
+	*CompactProgressMetrics
+}
+
+// NewCompactProgressCalculator creates a new CompactionProgressCalculator.
+func NewCompactionProgressCalculator(reg prometheus.Registerer, planner *tsdbBasedPlanner) *CompactionProgressCalculator {
+	return &CompactionProgressCalculator{
+		planner: planner,
+		CompactProgressMetrics: &CompactProgressMetrics{
+			NumberOfCompactionRuns: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+				Name: "thanos_compact_todo_compactions",
+				Help: "number of compactions to be done",
+			}, []string{"group"}),
+			NumberOfCompactionBlocks: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+				Name: "thanos_compact_todo_compaction_blocks",
+				Help: "number of blocks planned to be compacted",
+			}, []string{"group"}),
+		},
+	}
+}
+
+// ProgressCalculate calculates the number of blocks and compaction runs in the planning process of the given groups.
+func (ps *CompactionProgressCalculator) ProgressCalculate(ctx context.Context, groups []*Group) error {
+	groupCompactions := make(map[string]int, len(groups))
+	groupBlocks := make(map[string]int, len(groups))
+
+	for len(groups) > 0 {
+		tmpGroups := make([]*Group, 0, len(groups))
+		for _, g := range groups {
+			if len(g.IDs()) == 1 {
+				continue
+			}
+			plan, err := ps.planner.Plan(ctx, g.metasByMinTime)
+			if err != nil {
+				return errors.Wrapf(err, "could not plan")
+			}
+			if len(plan) == 0 {
+				continue
+			}
+			groupCompactions[g.key]++
+
+			toRemove := make(map[ulid.ULID]struct{}, len(plan))
+			metas := make([]*tsdb.BlockMeta, 0, len(plan))
+			for _, p := range plan {
+				metas = append(metas, &p.BlockMeta)
+				toRemove[p.BlockMeta.ULID] = struct{}{}
+			}
+			g.deleteFromGroup(toRemove)
+
+			groupBlocks[g.key] += len(plan)
+
+			if len(g.metasByMinTime) == 0 {
+				continue
+			}
+
+			newMeta := tsdb.CompactBlockMetas(ulid.MustNew(uint64(time.Now().Unix()), nil), metas...)
+			if err := g.AppendMeta(&metadata.Meta{BlockMeta: *newMeta, Thanos: metadata.Thanos{Downsample: metadata.ThanosDownsample{Resolution: g.Resolution()}, Labels: g.Labels().Map()}}); err != nil {
+				return errors.Wrapf(err, "append meta")
+			}
+			tmpGroups = append(tmpGroups, g)
+		}
+
+		groups = tmpGroups
+	}
+
+	ps.CompactProgressMetrics.NumberOfCompactionRuns.Reset()
+	ps.CompactProgressMetrics.NumberOfCompactionBlocks.Reset()
+
+	for key, iters := range groupCompactions {
+		ps.CompactProgressMetrics.NumberOfCompactionRuns.WithLabelValues(key).Add(float64(iters))
+		ps.CompactProgressMetrics.NumberOfCompactionBlocks.WithLabelValues(key).Add(float64(groupBlocks[key]))
+	}
+
+	return nil
+}
+
+// DownsampleProgressMetrics contains Prometheus metrics related to downsampling progress.
+type DownsampleProgressMetrics struct {
+	NumberOfBlocksDownsampled *prometheus.GaugeVec
+}
+
+// DownsampleProgressCalculator contains DownsampleMetrics, which are updated during the downsampling simulation process.
+type DownsampleProgressCalculator struct {
+	*DownsampleProgressMetrics
+}
+
+// NewDownsampleProgressCalculator creates a new DownsampleProgressCalculator.
+func NewDownsampleProgressCalculator(reg prometheus.Registerer) *DownsampleProgressCalculator {
+	return &DownsampleProgressCalculator{
+		DownsampleProgressMetrics: &DownsampleProgressMetrics{
+			NumberOfBlocksDownsampled: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+				Name: "thanos_compact_todo_downsample_blocks",
+				Help: "number of blocks to be downsampled",
+			}, []string{"group"}),
+		},
+	}
+}
+
+// ProgressCalculate calculates the number of blocks to be downsampled for the given groups.
+func (ds *DownsampleProgressCalculator) ProgressCalculate(ctx context.Context, groups []*Group) error {
+	sources5m := map[ulid.ULID]struct{}{}
+	sources1h := map[ulid.ULID]struct{}{}
+	groupBlocks := make(map[string]int, len(groups))
+
+	for _, group := range groups {
+		for _, m := range group.metasByMinTime {
+			switch m.Thanos.Downsample.Resolution {
+			case downsample.ResLevel0:
+				continue
+			case downsample.ResLevel1:
+				for _, id := range m.Compaction.Sources {
+					sources5m[id] = struct{}{}
+				}
+			case downsample.ResLevel2:
+				for _, id := range m.Compaction.Sources {
+					sources1h[id] = struct{}{}
+				}
+			default:
+				return errors.Errorf("unexpected downsampling resolution %d", m.Thanos.Downsample.Resolution)
+			}
+
+		}
+	}
+
+	for _, group := range groups {
+		for _, m := range group.metasByMinTime {
+			switch m.Thanos.Downsample.Resolution {
+			case downsample.ResLevel0:
+				missing := false
+				for _, id := range m.Compaction.Sources {
+					if _, ok := sources5m[id]; !ok {
+						missing = true
+						break
+					}
+				}
+				if !missing {
+					continue
+				}
+
+				if m.MaxTime-m.MinTime < downsample.ResLevel1DownsampleRange {
+					continue
+				}
+				groupBlocks[group.key]++
+			case downsample.ResLevel1:
+				missing := false
+				for _, id := range m.Compaction.Sources {
+					if _, ok := sources1h[id]; !ok {
+						missing = true
+						break
+					}
+				}
+				if !missing {
+					continue
+				}
+
+				if m.MaxTime-m.MinTime < downsample.ResLevel2DownsampleRange {
+					continue
+				}
+				groupBlocks[group.key]++
+			}
+		}
+	}
+
+	ds.DownsampleProgressMetrics.NumberOfBlocksDownsampled.Reset()
+	for key, blocks := range groupBlocks {
+		ds.DownsampleProgressMetrics.NumberOfBlocksDownsampled.WithLabelValues(key).Add(float64(blocks))
+	}
+
+	return nil
+}
+
+// RetentionProgressMetrics contains Prometheus metrics related to retention progress.
+type RetentionProgressMetrics struct {
+	NumberOfBlocksToDelete *prometheus.GaugeVec
+}
+
+// RetentionProgressCalculator contains RetentionProgressMetrics, which are updated during the retention simulation process.
+type RetentionProgressCalculator struct {
+	*RetentionProgressMetrics
+	retentionByResolution map[ResolutionLevel]time.Duration
+}
+
+// NewRetentionProgressCalculator creates a new RetentionProgressCalculator.
+func NewRetentionProgressCalculator(reg prometheus.Registerer, retentionByResolution map[ResolutionLevel]time.Duration) *RetentionProgressCalculator {
+	return &RetentionProgressCalculator{
+		retentionByResolution: retentionByResolution,
+		RetentionProgressMetrics: &RetentionProgressMetrics{
+			NumberOfBlocksToDelete: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+				Name: "thanos_compact_todo_deletion_blocks",
+				Help: "number of blocks that have crossed their retention period",
+			}, []string{"group"}),
+		},
+	}
+}
+
+// ProgressCalculate calculates the number of blocks to be retained for the given groups.
+func (rs *RetentionProgressCalculator) ProgressCalculate(ctx context.Context, groups []*Group) error {
+	groupBlocks := make(map[string]int, len(groups))
+
+	for _, group := range groups {
+		for _, m := range group.metasByMinTime {
+			retentionDuration := rs.retentionByResolution[ResolutionLevel(m.Thanos.Downsample.Resolution)]
+			if retentionDuration.Seconds() == 0 {
+				continue
+			}
+			maxTime := time.Unix(m.MaxTime/1000, 0)
+			if time.Now().After(maxTime.Add(retentionDuration)) {
+				groupBlocks[group.key]++
+			}
+		}
+	}
+
+	rs.RetentionProgressMetrics.NumberOfBlocksToDelete.Reset()
+	for key, blocks := range groupBlocks {
+		rs.RetentionProgressMetrics.NumberOfBlocksToDelete.WithLabelValues(key).Add(float64(blocks))
+	}
+
+	return nil
+}
+
 // Planner returns blocks to compact.
 type Planner interface {
 	// Plan returns a list of blocks that should be compacted into single one.
@@ -518,7 +773,10 @@ func (cg *Group) Compact(ctx context.Context, dir string, planner Planner, comp 
 		return false, ulid.ULID{}, errors.Wrap(err, "create compaction group dir")
 	}
 
-	shouldRerun, compID, err := cg.compact(ctx, subDir, planner, comp)
+	err := tracing.DoInSpanWithErr(ctx, "compaction_group", func(ctx context.Context) (err error) {
+		shouldRerun, compID, err = cg.compact(ctx, subDir, planner, comp)
+		return err
+	}, opentracing.Tags{"group.key": cg.Key()})
 	if err != nil {
 		cg.compactionFailures.Inc()
 		return false, ulid.ULID{}, err
@@ -718,7 +976,7 @@ func RepairIssue347(ctx context.Context, logger log.Logger, bkt objstore.Bucket,
 	return nil
 }
 
-func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp Compactor) (shouldRerun bool, compID ulid.ULID, err error) {
+func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp Compactor) (shouldRerun bool, compID ulid.ULID, _ error) {
 	cg.mtx.Lock()
 	defer cg.mtx.Unlock()
 
@@ -734,8 +992,11 @@ func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp 
 		overlappingBlocks = true
 	}
 
-	toCompact, err := planner.Plan(ctx, cg.metasByMinTime)
-	if err != nil {
+	var toCompact []*metadata.Meta
+	if err := tracing.DoInSpanWithErr(ctx, "compaction_planning", func(ctx context.Context) (e error) {
+		toCompact, e = planner.Plan(ctx, cg.metasByMinTime)
+		return e
+	}); err != nil {
 		return false, ulid.ULID{}, errors.Wrap(err, "plan compaction")
 	}
 	if len(toCompact) == 0 {
@@ -751,50 +1012,69 @@ func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp 
 
 	// Once we have a plan we need to download the actual data.
 	begin := time.Now()
+	g, errCtx := errgroup.WithContext(ctx)
+	g.SetLimit(cg.compactBlocksFetchConcurrency)
 
 	toCompactDirs := make([]string, 0, len(toCompact))
-	for _, meta := range toCompact {
-		bdir := filepath.Join(dir, meta.ULID.String())
-		for _, s := range meta.Compaction.Sources {
+	for _, m := range toCompact {
+		bdir := filepath.Join(dir, m.ULID.String())
+		for _, s := range m.Compaction.Sources {
 			if _, ok := uniqueSources[s]; ok {
 				return false, ulid.ULID{}, halt(errors.Errorf("overlapping sources detected for plan %v", toCompact))
 			}
 			uniqueSources[s] = struct{}{}
 		}
+		func(ctx context.Context, meta *metadata.Meta) {
+			g.Go(func() error {
+				if err := tracing.DoInSpanWithErr(ctx, "compaction_block_download", func(ctx context.Context) error {
+					return block.Download(ctx, cg.logger, cg.bkt, meta.ULID, bdir, objstore.WithFetchConcurrency(cg.blockFilesConcurrency))
+				}, opentracing.Tags{"block.id": meta.ULID}); err != nil {
+					return retry(errors.Wrapf(err, "download block %s", meta.ULID))
+				}
 
-		if err := block.Download(ctx, cg.logger, cg.bkt, meta.ULID, bdir); err != nil {
-			return false, ulid.ULID{}, retry(errors.Wrapf(err, "download block %s", meta.ULID))
-		}
+				// Ensure all input blocks are valid.
+				var stats block.HealthStats
+				if err := tracing.DoInSpanWithErr(ctx, "compaction_block_health_stats", func(ctx context.Context) (e error) {
+					stats, e = block.GatherIndexHealthStats(cg.logger, filepath.Join(bdir, block.IndexFilename), meta.MinTime, meta.MaxTime)
+					return e
+				}, opentracing.Tags{"block.id": meta.ULID}); err != nil {
+					return errors.Wrapf(err, "gather index issues for block %s", bdir)
+				}
 
-		// Ensure all input blocks are valid.
-		stats, err := block.GatherIndexHealthStats(cg.logger, filepath.Join(bdir, block.IndexFilename), meta.MinTime, meta.MaxTime)
-		if err != nil {
-			return false, ulid.ULID{}, errors.Wrapf(err, "gather index issues for block %s", bdir)
-		}
+				if err := stats.CriticalErr(); err != nil {
+					return halt(errors.Wrapf(err, "block with not healthy index found %s; Compaction level %v; Labels: %v", bdir, meta.Compaction.Level, meta.Thanos.Labels))
+				}
 
-		if err := stats.CriticalErr(); err != nil {
-			return false, ulid.ULID{}, halt(errors.Wrapf(err, "block with not healthy index found %s; Compaction level %v; Labels: %v", bdir, meta.Compaction.Level, meta.Thanos.Labels))
-		}
+				if err := stats.OutOfOrderChunksErr(); err != nil {
+					return outOfOrderChunkError(errors.Wrapf(err, "blocks with out-of-order chunks are dropped from compaction:  %s", bdir), meta.ULID)
+				}
 
-		if err := stats.OutOfOrderChunksErr(); err != nil {
-			return false, ulid.ULID{}, outOfOrderChunkError(errors.Wrapf(err, "blocks with out-of-order chunks are dropped from compaction:  %s", bdir), meta.ULID)
-		}
+				if err := stats.Issue347OutsideChunksErr(); err != nil {
+					return issue347Error(errors.Wrapf(err, "invalid, but reparable block %s", bdir), meta.ULID)
+				}
 
-		if err := stats.Issue347OutsideChunksErr(); err != nil {
-			return false, ulid.ULID{}, issue347Error(errors.Wrapf(err, "invalid, but reparable block %s", bdir), meta.ULID)
-		}
+				if err := stats.PrometheusIssue5372Err(); !cg.acceptMalformedIndex && err != nil {
+					return errors.Wrapf(err,
+						"block id %s, try running with --debug.accept-malformed-index", meta.ULID)
+				}
+				return nil
+			})
+		}(errCtx, m)
 
-		if err := stats.PrometheusIssue5372Err(); !cg.acceptMalformedIndex && err != nil {
-			return false, ulid.ULID{}, errors.Wrapf(err,
-				"block id %s, try running with --debug.accept-malformed-index", meta.ULID)
-		}
 		toCompactDirs = append(toCompactDirs, bdir)
 	}
+
+	if err := g.Wait(); err != nil {
+		return false, ulid.ULID{}, err
+	}
+
 	level.Info(cg.logger).Log("msg", "downloaded and verified blocks; compacting blocks", "plan", fmt.Sprintf("%v", toCompactDirs), "duration", time.Since(begin), "duration_ms", time.Since(begin).Milliseconds())
 
 	begin = time.Now()
-	compID, err = comp.Compact(dir, toCompactDirs, nil)
-	if err != nil {
+	if err := tracing.DoInSpanWithErr(ctx, "compaction", func(ctx context.Context) (e error) {
+		compID, e = comp.Compact(dir, toCompactDirs, nil)
+		return e
+	}); err != nil {
 		return false, ulid.ULID{}, halt(errors.Wrapf(err, "compact blocks %v", toCompactDirs))
 	}
 	if compID == (ulid.ULID{}) {
@@ -835,7 +1115,10 @@ func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp 
 	}
 
 	// Ensure the output block is valid.
-	if err := block.VerifyIndex(cg.logger, index, newMeta.MinTime, newMeta.MaxTime); !cg.acceptMalformedIndex && err != nil {
+	err = tracing.DoInSpanWithErr(ctx, "compaction_verify_index", func(ctx context.Context) error {
+		return block.VerifyIndex(cg.logger, index, newMeta.MinTime, newMeta.MaxTime)
+	})
+	if !cg.acceptMalformedIndex && err != nil {
 		return false, ulid.ULID{}, halt(errors.Wrapf(err, "invalid result block %s", bdir))
 	}
 
@@ -849,7 +1132,10 @@ func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp 
 
 	begin = time.Now()
 
-	if err := block.Upload(ctx, cg.logger, cg.bkt, bdir, cg.hashFunc); err != nil {
+	err = tracing.DoInSpanWithErr(ctx, "compaction_block_upload", func(ctx context.Context) error {
+		return block.Upload(ctx, cg.logger, cg.bkt, bdir, cg.hashFunc, objstore.WithUploadConcurrency(cg.blockFilesConcurrency))
+	})
+	if err != nil {
 		return false, ulid.ULID{}, retry(errors.Wrapf(err, "upload of %s failed", compID))
 	}
 	level.Info(cg.logger).Log("msg", "uploaded block", "result_block", compID, "duration", time.Since(begin), "duration_ms", time.Since(begin).Milliseconds())
@@ -858,7 +1144,10 @@ func (cg *Group) compact(ctx context.Context, dir string, planner Planner, comp 
 	// into the next planning cycle.
 	// Eventually the block we just uploaded should get synced into the group again (including sync-delay).
 	for _, meta := range toCompact {
-		if err := cg.deleteBlock(meta.ULID, filepath.Join(dir, meta.ULID.String())); err != nil {
+		err = tracing.DoInSpanWithErr(ctx, "compaction_block_delete", func(ctx context.Context) error {
+			return cg.deleteBlock(meta.ULID, filepath.Join(dir, meta.ULID.String()))
+		}, opentracing.Tags{"block.id": meta.ULID})
+		if err != nil {
 			return false, ulid.ULID{}, retry(errors.Wrapf(err, "mark old block for deletion from bucket"))
 		}
 		cg.groupGarbageCollectedBlocks.Inc()
@@ -1030,6 +1319,10 @@ func (c *BucketCompactor) Compact(ctx context.Context) (rerr error) {
 		var groupErrs errutil.MultiError
 	groupLoop:
 		for _, g := range groups {
+			// Ignore groups with only one block because there is nothing to compact.
+			if len(g.IDs()) == 1 {
+				continue
+			}
 			select {
 			case groupErr := <-errChan:
 				groupErrs.Add(groupErr)
@@ -1087,7 +1380,7 @@ func (f *GatherNoCompactionMarkFilter) NoCompactMarkedBlocks() map[ulid.ULID]*me
 }
 
 // Filter passes all metas, while gathering no compact markers.
-func (f *GatherNoCompactionMarkFilter) Filter(ctx context.Context, metas map[ulid.ULID]*metadata.Meta, synced *extprom.TxGaugeVec) error {
+func (f *GatherNoCompactionMarkFilter) Filter(ctx context.Context, metas map[ulid.ULID]*metadata.Meta, synced *extprom.TxGaugeVec, modified *extprom.TxGaugeVec) error {
 	f.noCompactMarkedMap = make(map[ulid.ULID]*metadata.NoCompactMark)
 
 	// Make a copy of block IDs to check, in order to avoid concurrency issues

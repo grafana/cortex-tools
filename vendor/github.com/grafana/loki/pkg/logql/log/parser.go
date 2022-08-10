@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/grafana/loki/pkg/logql/log/pattern"
 	"github.com/grafana/loki/pkg/logqlmodel"
 
+	"github.com/grafana/regexp"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
 )
@@ -30,7 +30,8 @@ var (
 	_ Stage = &RegexpParser{}
 	_ Stage = &LogfmtParser{}
 
-	errMissingCapture = errors.New("at least one named capture must be supplied")
+	errUnexpectedJSONObject = fmt.Errorf("expecting json object(%d), but it is not", jsoniter.ObjectValue)
+	errMissingCapture       = errors.New("at least one named capture must be supplied")
 )
 
 type JSONParser struct {
@@ -48,7 +49,7 @@ func NewJSONParser() *JSONParser {
 	}
 }
 
-func (j *JSONParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (j *JSONParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	if lbs.ParserLabelHints().NoLabels() {
 		return line, true
 	}
@@ -61,6 +62,7 @@ func (j *JSONParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 
 	if err := j.readObject(it); err != nil {
 		lbs.SetErr(errJSON)
+		lbs.SetErrorDetails(err.Error())
 		return line, true
 	}
 	return line, true
@@ -69,7 +71,7 @@ func (j *JSONParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 func (j *JSONParser) readObject(it *jsoniter.Iterator) error {
 	// we only care about object and values.
 	if nextType := it.WhatIsNext(); nextType != jsoniter.ObjectValue {
-		return fmt.Errorf("expecting json object(%d), got %d", jsoniter.ObjectValue, nextType)
+		return errUnexpectedJSONObject
 	}
 	_ = it.ReadMapCB(j.parseMap(""))
 	if it.Error != nil && it.Error != io.EOF {
@@ -226,7 +228,7 @@ func NewRegexpParser(re string) (*RegexpParser, error) {
 	}, nil
 }
 
-func (r *RegexpParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (r *RegexpParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	for i, value := range r.regex.FindSubmatch(line) {
 		if name, ok := r.nameIndex[i]; ok {
 			key, ok := r.keys.Get(unsafeGetBytes(name), func() (string, bool) {
@@ -264,7 +266,7 @@ func NewLogfmtParser() *LogfmtParser {
 	}
 }
 
-func (l *LogfmtParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (l *LogfmtParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	if lbs.ParserLabelHints().NoLabels() {
 		return line, true
 	}
@@ -295,6 +297,7 @@ func (l *LogfmtParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	}
 	if l.dec.Err() != nil {
 		lbs.SetErr(errLogfmt)
+		lbs.SetErrorDetails(l.dec.Err().Error())
 		return line, true
 	}
 	return line, true
@@ -323,7 +326,7 @@ func NewPatternParser(pn string) (*PatternParser, error) {
 	}, nil
 }
 
-func (l *PatternParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (l *PatternParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	if lbs.ParserLabelHints().NoLabels() {
 		return line, true
 	}
@@ -373,7 +376,7 @@ func NewJSONExpressionParser(expressions []JSONExpression) (*JSONExpressionParse
 	}, nil
 }
 
-func (j *JSONExpressionParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (j *JSONExpressionParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	if lbs.ParserLabelHints().NoLabels() {
 		return line, true
 	}
@@ -419,7 +422,7 @@ func NewUnpackParser() *UnpackParser {
 
 func (UnpackParser) RequiredLabelNames() []string { return []string{} }
 
-func (u *UnpackParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (u *UnpackParser) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	if lbs.ParserLabelHints().NoLabels() {
 		return line, true
 	}
@@ -430,6 +433,7 @@ func (u *UnpackParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	entry, err := u.unpack(it, line, lbs)
 	if err != nil {
 		lbs.SetErr(errJSON)
+		lbs.SetErrorDetails(err.Error())
 		return line, true
 	}
 	return entry, true
@@ -438,7 +442,7 @@ func (u *UnpackParser) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 func (u *UnpackParser) unpack(it *jsoniter.Iterator, entry []byte, lbs *LabelsBuilder) ([]byte, error) {
 	// we only care about object and values.
 	if nextType := it.WhatIsNext(); nextType != jsoniter.ObjectValue {
-		return nil, fmt.Errorf("expecting json object(%d), got %d", jsoniter.ObjectValue, nextType)
+		return nil, errUnexpectedJSONObject
 	}
 	var isPacked bool
 	_ = it.ReadMapCB(func(iter *jsoniter.Iterator, field string) bool {

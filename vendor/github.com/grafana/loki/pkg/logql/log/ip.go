@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"unicode"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"inet.af/netaddr"
 )
 
@@ -59,7 +59,7 @@ func (f *IPLineFilter) ToStage() Stage {
 }
 
 // `Process` implements `Stage` interface
-func (f *IPLineFilter) Process(line []byte, _ *LabelsBuilder) ([]byte, bool) {
+func (f *IPLineFilter) Process(_ int64, line []byte, _ *LabelsBuilder) ([]byte, bool) {
 	return line, f.filterTy(line, f.ty)
 }
 
@@ -103,7 +103,7 @@ func NewIPLabelFilter(pattern string, label string, ty LabelFilterType) *IPLabel
 }
 
 // `Process` implements `Stage` interface
-func (f *IPLabelFilter) Process(line []byte, lbs *LabelsBuilder) ([]byte, bool) {
+func (f *IPLabelFilter) Process(_ int64, line []byte, lbs *LabelsBuilder) ([]byte, bool) {
 	return line, f.filterTy(line, f.ty, lbs)
 }
 
@@ -192,7 +192,7 @@ func (f *ipFilter) filter(line []byte) bool {
 		}
 		ip, err := netaddr.ParseIP(string(line[start : start+iplen]))
 		if err == nil {
-			if contains(f.matcher, ip) {
+			if containsIP(f.matcher, ip) {
 				return true, 0
 			}
 		}
@@ -223,7 +223,7 @@ func (f *ipFilter) filter(line []byte) bool {
 	return false
 }
 
-func contains(matcher IPMatcher, ip netaddr.IP) bool {
+func containsIP(matcher IPMatcher, ip netaddr.IP) bool {
 	switch m := matcher.(type) {
 	case netaddr.IP:
 		return m.Compare(ip) == 0

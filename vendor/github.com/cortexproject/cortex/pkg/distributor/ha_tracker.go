@@ -13,15 +13,15 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
-	"github.com/grafana/dskit/kv"
-	"github.com/grafana/dskit/kv/codec"
-	"github.com/grafana/dskit/services"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/prometheus/pkg/timestamp"
+	"github.com/prometheus/prometheus/model/timestamp"
 
 	"github.com/cortexproject/cortex/pkg/cortexpb"
+	"github.com/cortexproject/cortex/pkg/ring/kv"
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 	"github.com/cortexproject/cortex/pkg/util"
+	"github.com/cortexproject/cortex/pkg/util/services"
 )
 
 var (
@@ -471,7 +471,9 @@ func findHALabels(replicaLabel, clusterLabel string, labels []cortexpb.LabelAdap
 			replica = pair.Value
 		}
 		if pair.Name == clusterLabel {
-			cluster = pair.Value
+			// cluster label is unmarshalled into yoloString, which retains original remote write request body in memory.
+			// Hence, we clone the yoloString to allow the request body to be garbage collected.
+			cluster = util.StringsClone(pair.Value)
 		}
 	}
 

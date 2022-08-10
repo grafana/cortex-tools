@@ -9,17 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/types"
-	"github.com/grafana/dskit/kv"
-	"github.com/grafana/dskit/ring"
-	"github.com/grafana/dskit/services"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/extprom"
@@ -33,6 +33,8 @@ import (
 	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/querier/series"
 	"github.com/cortexproject/cortex/pkg/querier/stats"
+	"github.com/cortexproject/cortex/pkg/ring"
+	"github.com/cortexproject/cortex/pkg/ring/kv"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	cortex_tsdb "github.com/cortexproject/cortex/pkg/storage/tsdb"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
@@ -43,6 +45,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/util/limiter"
 	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/cortexproject/cortex/pkg/util/math"
+	"github.com/cortexproject/cortex/pkg/util/services"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
 	"github.com/cortexproject/cortex/pkg/util/validation"
 )
@@ -419,6 +422,7 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error) {
 		seriesSets, queriedBlocks, warnings, numChunks, err := q.fetchSeriesFromStores(spanCtx, sp, clients, minT, maxT, matchers, convertedMatchers, maxChunksLimit, leftChunksLimit)
 		if err != nil {
+
 			return nil, err
 		}
 
@@ -586,6 +590,9 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 			// TODO(goutham): we should ideally be passing the hints down to the storage layer
 			// and let the TSDB return us data with no chunks as in prometheus#8050.
 			// But this is an acceptable workaround for now.
+
+			// Only fail the function if we have validation error. We should return blocks that were successfully
+			// retrieved.
 			skipChunks := sp != nil && sp.Func == "series"
 
 			req, err := createSeriesRequest(minT, maxT, convertedMatchers, skipChunks, blockIDs)
@@ -595,6 +602,10 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 			stream, err := c.Series(gCtx, req)
 			if err != nil {
+				if isRetryableError(err) {
+					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch series from %s due to retryable error", c.RemoteAddress()))
+					return nil
+				}
 				return errors.Wrapf(err, "failed to fetch series from %s", c.RemoteAddress())
 			}
 
@@ -725,6 +736,10 @@ func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
 
 			namesResp, err := c.LabelNames(gCtx, req)
 			if err != nil {
+				if isRetryableError(err) {
+					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch series from %s due to retryable error", c.RemoteAddress()))
+					return nil
+				}
 				return errors.Wrapf(err, "failed to fetch series from %s", c.RemoteAddress())
 			}
 
@@ -802,6 +817,10 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 
 			valuesResp, err := c.LabelValues(gCtx, req)
 			if err != nil {
+				if isRetryableError(err) {
+					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch series from %s due to retryable error", c.RemoteAddress()))
+					return nil
+				}
 				return errors.Wrapf(err, "failed to fetch series from %s", c.RemoteAddress())
 			}
 
@@ -966,4 +985,14 @@ func countChunkBytes(series ...*storepb.Series) (count int) {
 	}
 
 	return count
+}
+
+// only retry connection issues
+func isRetryableError(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable:
+		return true
+	default:
+		return false
+	}
 }

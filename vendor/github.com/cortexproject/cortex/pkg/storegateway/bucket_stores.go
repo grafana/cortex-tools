@@ -14,7 +14,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/grafana/dskit/backoff"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb"
+	"github.com/cortexproject/cortex/pkg/util/backoff"
 	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
 	"github.com/cortexproject/cortex/pkg/util/validation"
@@ -429,16 +429,13 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 		// the consistency check done on the querier. The duplicate filter removes redundant blocks
 		// but if the store-gateway removes redundant blocks before the querier discovers them, the
 		// consistency check on the querier will fail.
-	}...)
-
-	modifiers := []block.MetadataModifier{
-		// Remove Cortex external labels so that they're not injected when querying blocks.
 		NewReplicaLabelRemover(userLogger, []string{
 			tsdb.TenantIDExternalLabel,
 			tsdb.IngesterIDExternalLabel,
 			tsdb.ShardIDExternalLabel,
 		}),
-	}
+		// Remove Cortex external labels so that they're not injected when querying blocks.
+	}...)
 
 	// Instantiate a different blocks metadata fetcher based on whether bucket index is enabled or not.
 	var fetcher block.MetadataFetcher
@@ -450,8 +447,7 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 			u.limits,
 			u.logger,
 			fetcherReg,
-			filters,
-			modifiers)
+			filters)
 	} else {
 		// Wrap the bucket reader to skip iterating the bucket at all if the user doesn't
 		// belong to the store-gateway shard. We need to run the BucketStore synching anyway
@@ -468,7 +464,6 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 			u.syncDirForUser(userID), // The fetcher stores cached metas in the "meta-syncer/" sub directory
 			fetcherReg,
 			filters,
-			modifiers,
 		)
 		if err != nil {
 			return nil, err
@@ -492,7 +487,7 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 		fetcher,
 		u.syncDirForUser(userID),
 		newChunksLimiterFactory(u.limits, userID),
-		store.NewSeriesLimiterFactory(0), // No series limiter.
+		newSeriesLimiterFactory(u.limits, userID),
 		u.partitioner,
 		u.cfg.BucketStore.BlockSyncConcurrency,
 		false, // No need to enable backward compatibility with Thanos pre 0.8.0 queriers
@@ -581,7 +576,7 @@ func NewReplicaLabelRemover(logger log.Logger, replicaLabels []string) *ReplicaL
 }
 
 // Modify modifies external labels of existing blocks, it removes given replica labels from the metadata of blocks that have it.
-func (r *ReplicaLabelRemover) Modify(_ context.Context, metas map[ulid.ULID]*thanos_metadata.Meta, modified *extprom.TxGaugeVec) error {
+func (r *ReplicaLabelRemover) Filter(_ context.Context, metas map[ulid.ULID]*thanos_metadata.Meta, _ *extprom.TxGaugeVec, _ *extprom.TxGaugeVec) error {
 	for u, meta := range metas {
 		l := meta.Thanos.Labels
 		for _, replicaLabel := range r.replicaLabels {
@@ -605,11 +600,11 @@ func (s spanSeriesServer) Context() context.Context {
 	return s.ctx
 }
 
-type chunkLimiter struct {
+type limiter struct {
 	limiter *store.Limiter
 }
 
-func (c *chunkLimiter) Reserve(num uint64) error {
+func (c *limiter) Reserve(num uint64) error {
 	err := c.limiter.Reserve(num)
 	if err != nil {
 		return httpgrpc.Errorf(http.StatusUnprocessableEntity, err.Error())
@@ -622,8 +617,18 @@ func newChunksLimiterFactory(limits *validation.Overrides, userID string) store.
 	return func(failedCounter prometheus.Counter) store.ChunksLimiter {
 		// Since limit overrides could be live reloaded, we have to get the current user's limit
 		// each time a new limiter is instantiated.
-		return &chunkLimiter{
+		return &limiter{
 			limiter: store.NewLimiter(uint64(limits.MaxChunksPerQueryFromStore(userID)), failedCounter),
+		}
+	}
+}
+
+func newSeriesLimiterFactory(limits *validation.Overrides, userID string) store.SeriesLimiterFactory {
+	return func(failedCounter prometheus.Counter) store.SeriesLimiter {
+		// Since limit overrides could be live reloaded, we have to get the current user's limit
+		// each time a new limiter is instantiated.
+		return &limiter{
+			limiter: store.NewLimiter(uint64(limits.MaxFetchedSeriesPerQuery(userID)), failedCounter),
 		}
 	}
 }

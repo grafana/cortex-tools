@@ -15,11 +15,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/relabel"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/fileutil"
@@ -149,6 +149,12 @@ func InjectThanos(logger log.Logger, bdir string, meta Thanos, downsampledMeta *
 	}
 
 	return newMeta, nil
+}
+
+// Returns a unique identifier for the compaction group the block belongs to.
+// It considers the downsampling resolution and the block's labels.
+func (m *Thanos) GroupKey() string {
+	return fmt.Sprintf("%d@%v", m.Downsample.Resolution, labels.FromMap(m.Labels).Hash())
 }
 
 // WriteToDir writes the encoded meta into <dir>/meta.json.

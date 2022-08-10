@@ -14,16 +14,16 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/tsdb/chunkenc"
-	"github.com/prometheus/prometheus/tsdb/chunks"
-	"github.com/prometheus/prometheus/tsdb/index"
-
 	"github.com/davecgh/go-spew/spew"
 	"github.com/pkg/errors"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"github.com/prometheus/prometheus/tsdb/chunks"
+	"github.com/prometheus/prometheus/tsdb/index"
 	"go.uber.org/goleak"
 )
 
@@ -85,6 +85,52 @@ func Equals(tb testing.TB, exp, act interface{}, v ...interface{}) {
 		msg = fmt.Sprintf(v[0].(string), v[1:]...)
 	}
 	tb.Fatal(sprintfWithLimit("\033[31m%s:%d:"+msg+"\n\n\texp: %#v\n\n\tgot: %#v%s\033[39m\n\n", filepath.Base(file), line, exp, act, diff(exp, act)))
+}
+
+// Contains fails the test if needle is not contained within haystack, if haystack or needle is
+// an empty slice, or if needle is longer than haystack.
+func Contains(tb testing.TB, haystack, needle []string) {
+	_, file, line, _ := runtime.Caller(1)
+
+	if !contains(haystack, needle) {
+		tb.Fatalf(sprintfWithLimit("\033[31m%s:%d: %#v does not contain %#v\033[39m\n\n", filepath.Base(file), line, haystack, needle))
+	}
+}
+
+func contains(haystack, needle []string) bool {
+	if len(haystack) == 0 || len(needle) == 0 {
+		return false
+	}
+
+	if len(haystack) < len(needle) {
+		return false
+	}
+
+	for i := 0; i < len(haystack); i++ {
+		outer := i
+
+		for j := 0; j < len(needle); j++ {
+			// End of the haystack but not the end of the needle, end
+			if outer == len(haystack) {
+				return false
+			}
+
+			// No match, try the next index of the haystack
+			if haystack[outer] != needle[j] {
+				break
+			}
+
+			// End of the needle and it still matches, end
+			if j == len(needle)-1 {
+				return true
+			}
+
+			// This element matches between the two slices, try the next one
+			outer++
+		}
+	}
+
+	return false
 }
 
 func sprintfWithLimit(act string, v ...interface{}) string {
@@ -259,14 +305,14 @@ func PutOutOfOrderIndex(blockDir string, minTime int64, maxTime int64) error {
 		chk1 := chunks.Meta{
 			MinTime: maxTime - 2,
 			MaxTime: maxTime - 1,
-			Ref:     rand.Uint64(),
+			Ref:     chunks.ChunkRef(rand.Uint64()),
 			Chunk:   chunkenc.NewXORChunk(),
 		}
 		metas = append(metas, chk1)
 		chk2 := chunks.Meta{
 			MinTime: minTime + 1,
 			MaxTime: minTime + 2,
-			Ref:     rand.Uint64(),
+			Ref:     chunks.ChunkRef(rand.Uint64()),
 			Chunk:   chunkenc.NewXORChunk(),
 		}
 		metas = append(metas, chk2)
@@ -300,7 +346,7 @@ func PutOutOfOrderIndex(blockDir string, minTime int64, maxTime int64) error {
 	)
 
 	for i, s := range input {
-		if err := iw.AddSeries(uint64(i), s.labels, s.chunks...); err != nil {
+		if err := iw.AddSeries(storage.SeriesRef(i), s.labels, s.chunks...); err != nil {
 			return err
 		}
 
@@ -312,7 +358,7 @@ func PutOutOfOrderIndex(blockDir string, minTime int64, maxTime int64) error {
 			}
 			valset[l.Value] = struct{}{}
 		}
-		postings.Add(uint64(i), s.labels)
+		postings.Add(storage.SeriesRef(i), s.labels)
 	}
 
 	return iw.Close()

@@ -3,6 +3,7 @@ package ring
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/grafana/dskit/kv"
 	"github.com/grafana/dskit/services"
-	dstime "github.com/grafana/dskit/time"
 )
 
 type BasicLifecyclerDelegate interface {
@@ -49,8 +49,13 @@ type BasicLifecyclerConfig struct {
 	Zone string
 
 	HeartbeatPeriod     time.Duration
+	HeartbeatTimeout    time.Duration
 	TokensObservePeriod time.Duration
 	NumTokens           int
+
+	// If true lifecycler doesn't unregister instance from the ring when it's stopping. Default value is false,
+	// which means unregistering.
+	KeepInstanceInTheRingOnShutdown bool
 }
 
 // BasicLifecycler is a basic ring lifecycler which allows to hook custom
@@ -182,7 +187,7 @@ func (l *BasicLifecycler) starting(ctx context.Context) error {
 }
 
 func (l *BasicLifecycler) running(ctx context.Context) error {
-	heartbeatTickerStop, heartbeatTickerChan := dstime.NewDisableableTicker(l.cfg.HeartbeatPeriod)
+	heartbeatTickerStop, heartbeatTickerChan := newDisableableTicker(l.cfg.HeartbeatPeriod)
 	defer heartbeatTickerStop()
 
 	for {
@@ -214,7 +219,7 @@ func (l *BasicLifecycler) stopping(runningError error) error {
 	}()
 
 	// Heartbeat while the stopping delegate function is running.
-	heartbeatTickerStop, heartbeatTickerChan := dstime.NewDisableableTicker(l.cfg.HeartbeatPeriod)
+	heartbeatTickerStop, heartbeatTickerChan := newDisableableTicker(l.cfg.HeartbeatPeriod)
 	defer heartbeatTickerStop()
 
 heartbeatLoop:
@@ -227,11 +232,15 @@ heartbeatLoop:
 		}
 	}
 
-	// Remove the instance from the ring.
-	if err := l.unregisterInstance(context.Background()); err != nil {
-		return errors.Wrapf(err, "failed to unregister instance from the ring (ring: %s)", l.ringName)
+	if l.cfg.KeepInstanceInTheRingOnShutdown {
+		level.Info(l.logger).Log("msg", "keeping instance the ring", "ring", l.ringName)
+	} else {
+		// Remove the instance from the ring.
+		if err := l.unregisterInstance(context.Background()); err != nil {
+			return errors.Wrapf(err, "failed to unregister instance from the ring (ring: %s)", l.ringName)
+		}
+		level.Info(l.logger).Log("msg", "instance removed from the ring", "ring", l.ringName)
 	}
-	level.Info(l.logger).Log("msg", "instance removed from the ring", "ring", l.ringName)
 
 	return nil
 }
@@ -292,7 +301,7 @@ func (l *BasicLifecycler) registerInstance(ctx context.Context) error {
 }
 
 func (l *BasicLifecycler) waitStableTokens(ctx context.Context, period time.Duration) error {
-	heartbeatTickerStop, heartbeatTickerChan := dstime.NewDisableableTicker(l.cfg.HeartbeatPeriod)
+	heartbeatTickerStop, heartbeatTickerChan := newDisableableTicker(l.cfg.HeartbeatPeriod)
 	defer heartbeatTickerStop()
 
 	// The first observation will occur after the specified period.
@@ -397,8 +406,13 @@ func (l *BasicLifecycler) updateInstance(ctx context.Context, update func(*Desc,
 		// This could happen if the backend store restarted (and content deleted)
 		// or the instance has been forgotten. In this case, we do re-insert it.
 		if !ok {
-			level.Warn(l.logger).Log("msg", "instance missing in the ring, adding it back", "ring", l.ringName)
-			instanceDesc = ringDesc.AddIngester(l.cfg.ID, l.cfg.Addr, l.cfg.Zone, l.GetTokens(), l.GetState(), l.GetRegisteredAt())
+			level.Warn(l.logger).Log("msg", "instance is missing in the ring (e.g. the ring backend storage has been reset), registering the instance with an updated registration timestamp", "ring", l.ringName)
+
+			// Due to how shuffle sharding work, the missing instance for some period of time could have cause
+			// a resharding of tenants among instances: to guarantee query correctness we need to update the
+			// registration timestamp to current time.
+			registeredAt := time.Now()
+			instanceDesc = ringDesc.AddIngester(l.cfg.ID, l.cfg.Addr, l.cfg.Zone, l.GetTokens(), l.GetState(), registeredAt)
 		}
 
 		prevTimestamp := instanceDesc.Timestamp
@@ -483,4 +497,21 @@ func (l *BasicLifecycler) run(fn func() error) error {
 	case l.actorChan <- wrappedFn:
 		return <-errCh
 	}
+}
+
+func (l *BasicLifecycler) casRing(ctx context.Context, f func(in interface{}) (out interface{}, retry bool, err error)) error {
+	return l.store.CAS(ctx, l.ringKey, f)
+}
+
+func (l *BasicLifecycler) getRing(ctx context.Context) (*Desc, error) {
+	obj, err := l.store.Get(ctx, l.ringKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return GetOrCreateRingDesc(obj), nil
+}
+
+func (l *BasicLifecycler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	newRingPageHandler(l, l.cfg.HeartbeatTimeout).handle(w, req)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"sync"
@@ -12,14 +13,13 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
-	perrors "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/atomic"
 
 	"github.com/grafana/dskit/flagext"
 	"github.com/grafana/dskit/kv"
+	"github.com/grafana/dskit/netutil"
 	"github.com/grafana/dskit/services"
-	dstime "github.com/grafana/dskit/time"
 )
 
 // LifecyclerConfig is the config to build a Lifecycler.
@@ -27,34 +27,40 @@ type LifecyclerConfig struct {
 	RingConfig Config `yaml:"ring"`
 
 	// Config for the ingester lifecycle control
-	NumTokens                int           `yaml:"num_tokens"`
-	HeartbeatPeriod          time.Duration `yaml:"heartbeat_period"`
-	ObservePeriod            time.Duration `yaml:"observe_period"`
-	JoinAfter                time.Duration `yaml:"join_after"`
-	MinReadyDuration         time.Duration `yaml:"min_ready_duration"`
-	InfNames                 []string      `yaml:"interface_names"`
-	FinalSleep               time.Duration `yaml:"final_sleep"`
+	NumTokens        int           `yaml:"num_tokens" category:"advanced"`
+	HeartbeatPeriod  time.Duration `yaml:"heartbeat_period" category:"advanced"`
+	HeartbeatTimeout time.Duration `yaml:"heartbeat_timeout" category:"advanced"`
+	ObservePeriod    time.Duration `yaml:"observe_period" category:"advanced"`
+	JoinAfter        time.Duration `yaml:"join_after" category:"advanced"`
+	MinReadyDuration time.Duration `yaml:"min_ready_duration" category:"advanced"`
+	InfNames         []string      `yaml:"interface_names" doc:"default=[<private network interfaces>]"`
+
+	// FinalSleep's default value can be overridden by
+	// setting it before calling RegisterFlags or RegisterFlagsWithPrefix.
+	FinalSleep               time.Duration `yaml:"final_sleep" category:"advanced"`
 	TokensFilePath           string        `yaml:"tokens_file_path"`
 	Zone                     string        `yaml:"availability_zone"`
-	UnregisterOnShutdown     bool          `yaml:"unregister_on_shutdown"`
-	ReadinessCheckRingHealth bool          `yaml:"readiness_check_ring_health"`
+	UnregisterOnShutdown     bool          `yaml:"unregister_on_shutdown" category:"advanced"`
+	ReadinessCheckRingHealth bool          `yaml:"readiness_check_ring_health" category:"advanced"`
 
 	// For testing, you can override the address and ID of this ingester
-	Addr string `yaml:"address" doc:"hidden"`
-	Port int    `doc:"hidden"`
-	ID   string `doc:"hidden"`
+	Addr string `yaml:"address" category:"advanced"`
+	Port int    `category:"advanced"`
+	ID   string `doc:"default=<hostname>" category:"advanced"`
 
 	// Injected internally
 	ListenPort int `yaml:"-"`
 }
 
-// RegisterFlags adds the flags required to config this to the given FlagSet
-func (cfg *LifecyclerConfig) RegisterFlags(f *flag.FlagSet) {
-	cfg.RegisterFlagsWithPrefix("", f)
+// RegisterFlags adds the flags required to config this to the given FlagSet.
+// The default values of some flags can be changed; see docs of LifecyclerConfig.
+func (cfg *LifecyclerConfig) RegisterFlags(f *flag.FlagSet, logger log.Logger) {
+	cfg.RegisterFlagsWithPrefix("", f, logger)
 }
 
 // RegisterFlagsWithPrefix adds the flags required to config this to the given FlagSet.
-func (cfg *LifecyclerConfig) RegisterFlagsWithPrefix(prefix string, f *flag.FlagSet) {
+// The default values of some flags can be changed; see docs of LifecyclerConfig.
+func (cfg *LifecyclerConfig) RegisterFlagsWithPrefix(prefix string, f *flag.FlagSet, logger log.Logger) {
 	cfg.RingConfig.RegisterFlagsWithPrefix(prefix, f)
 
 	// In order to keep backwards compatibility all of these need to be prefixed
@@ -65,10 +71,11 @@ func (cfg *LifecyclerConfig) RegisterFlagsWithPrefix(prefix string, f *flag.Flag
 
 	f.IntVar(&cfg.NumTokens, prefix+"num-tokens", 128, "Number of tokens for each ingester.")
 	f.DurationVar(&cfg.HeartbeatPeriod, prefix+"heartbeat-period", 5*time.Second, "Period at which to heartbeat to consul. 0 = disabled.")
+	f.DurationVar(&cfg.HeartbeatTimeout, prefix+"heartbeat-timeout", 1*time.Minute, "Heartbeat timeout after which instance is assumed to be unhealthy. 0 = disabled.")
 	f.DurationVar(&cfg.JoinAfter, prefix+"join-after", 0*time.Second, "Period to wait for a claim from another member; will join automatically after this.")
 	f.DurationVar(&cfg.ObservePeriod, prefix+"observe-period", 0*time.Second, "Observe tokens after generating to resolve collisions. Useful when using gossiping ring.")
 	f.DurationVar(&cfg.MinReadyDuration, prefix+"min-ready-duration", 15*time.Second, "Minimum duration to wait after the internal readiness checks have passed but before succeeding the readiness endpoint. This is used to slowdown deployment controllers (eg. Kubernetes) after an instance is ready and before they proceed with a rolling update, to give the rest of the cluster instances enough time to receive ring updates.")
-	f.DurationVar(&cfg.FinalSleep, prefix+"final-sleep", 30*time.Second, "Duration to sleep for before exiting, to ensure metrics are scraped.")
+	f.DurationVar(&cfg.FinalSleep, prefix+"final-sleep", cfg.FinalSleep, "Duration to sleep for before exiting, to ensure metrics are scraped.")
 	f.StringVar(&cfg.TokensFilePath, prefix+"tokens-file-path", "", "File path where tokens are stored. If empty, tokens are not stored at shutdown and restored at startup.")
 
 	hostname, err := os.Hostname()
@@ -76,7 +83,7 @@ func (cfg *LifecyclerConfig) RegisterFlagsWithPrefix(prefix string, f *flag.Flag
 		panic(fmt.Errorf("failed to get hostname %s", err))
 	}
 
-	cfg.InfNames = []string{"eth0", "en0"}
+	cfg.InfNames = netutil.PrivateNetworkInterfacesWithFallback([]string{"eth0", "en0"}, logger)
 	f.Var((*flagext.StringSlice)(&cfg.InfNames), prefix+"lifecycler.interface", "Name of network interface to read address from.")
 	f.StringVar(&cfg.Addr, prefix+"lifecycler.addr", "", "IP address to advertise in the ring.")
 	f.IntVar(&cfg.Port, prefix+"lifecycler.port", 0, "port to advertise in consul (defaults to server.grpc-listen-port).")
@@ -104,8 +111,9 @@ type Lifecycler struct {
 	Zone     string
 
 	// Whether to flush if transfer fails on shutdown.
-	flushOnShutdown      *atomic.Bool
-	unregisterOnShutdown *atomic.Bool
+	flushOnShutdown       *atomic.Bool
+	unregisterOnShutdown  *atomic.Bool
+	clearTokensOnShutdown *atomic.Bool
 
 	// We need to remember the ingester state, tokens and registered timestamp just in case the KV store
 	// goes away and comes back empty. The state changes during lifecycle of instance.
@@ -147,11 +155,6 @@ func NewLifecycler(cfg LifecyclerConfig, flushTransferer FlushTransferer, ringNa
 		return nil, err
 	}
 
-	zone := cfg.Zone
-	if zone != "" {
-		level.Warn(logger).Log("msg", "experimental feature in use", "feature", "Zone aware replication")
-	}
-
 	// We do allow a nil FlushTransferer, but to keep the ring logic easier we assume
 	// it's always set, so we use a noop FlushTransferer
 	if flushTransferer == nil {
@@ -159,23 +162,22 @@ func NewLifecycler(cfg LifecyclerConfig, flushTransferer FlushTransferer, ringNa
 	}
 
 	l := &Lifecycler{
-		cfg:                  cfg,
-		flushTransferer:      flushTransferer,
-		KVStore:              store,
-		Addr:                 fmt.Sprintf("%s:%d", addr, port),
-		ID:                   cfg.ID,
-		RingName:             ringName,
-		RingKey:              ringKey,
-		flushOnShutdown:      atomic.NewBool(flushOnShutdown),
-		unregisterOnShutdown: atomic.NewBool(cfg.UnregisterOnShutdown),
-		Zone:                 zone,
-		actorChan:            make(chan func()),
-		state:                PENDING,
-		lifecyclerMetrics:    NewLifecyclerMetrics(ringName, reg),
-		logger:               logger,
+		cfg:                   cfg,
+		flushTransferer:       flushTransferer,
+		KVStore:               store,
+		Addr:                  fmt.Sprintf("%s:%d", addr, port),
+		ID:                    cfg.ID,
+		RingName:              ringName,
+		RingKey:               ringKey,
+		flushOnShutdown:       atomic.NewBool(flushOnShutdown),
+		unregisterOnShutdown:  atomic.NewBool(cfg.UnregisterOnShutdown),
+		clearTokensOnShutdown: atomic.NewBool(false),
+		Zone:                  cfg.Zone,
+		actorChan:             make(chan func()),
+		state:                 PENDING,
+		lifecyclerMetrics:     NewLifecyclerMetrics(ringName, reg),
+		logger:                logger,
 	}
-
-	l.lifecyclerMetrics.tokensToOwn.Set(float64(cfg.NumTokens))
 
 	l.BasicService = services.
 		NewBasicService(nil, l.loop, l.stopping).
@@ -303,8 +305,6 @@ func (i *Lifecycler) getTokens() Tokens {
 }
 
 func (i *Lifecycler) setTokens(tokens Tokens) {
-	i.lifecyclerMetrics.tokensOwned.Set(float64(len(tokens)))
-
 	i.stateMtx.Lock()
 	defer i.stateMtx.Unlock()
 
@@ -396,14 +396,14 @@ func (i *Lifecycler) loop(ctx context.Context) error {
 	// First, see if we exist in the cluster, update our state to match if we do,
 	// and add ourselves (without tokens) if we don't.
 	if err := i.initRing(context.Background()); err != nil {
-		return perrors.Wrapf(err, "failed to join the ring %s", i.RingName)
+		return errors.Wrapf(err, "failed to join the ring %s", i.RingName)
 	}
 
 	// We do various period tasks
 	autoJoinAfter := time.After(i.cfg.JoinAfter)
 	var observeChan <-chan time.Time
 
-	heartbeatTickerStop, heartbeatTickerChan := dstime.NewDisableableTicker(i.cfg.HeartbeatPeriod)
+	heartbeatTickerStop, heartbeatTickerChan := newDisableableTicker(i.cfg.HeartbeatPeriod)
 	defer heartbeatTickerStop()
 
 	for {
@@ -419,14 +419,14 @@ func (i *Lifecycler) loop(ctx context.Context) error {
 					// let's observe the ring. By using JOINING state, this ingester will be ignored by LEAVING
 					// ingesters, but we also signal that it is not fully functional yet.
 					if err := i.autoJoin(context.Background(), JOINING); err != nil {
-						return perrors.Wrapf(err, "failed to pick tokens in the KV store, ring: %s", i.RingName)
+						return errors.Wrapf(err, "failed to pick tokens in the KV store, ring: %s", i.RingName)
 					}
 
 					level.Info(i.logger).Log("msg", "observing tokens before going ACTIVE", "ring", i.RingName)
 					observeChan = time.After(i.cfg.ObservePeriod)
 				} else {
 					if err := i.autoJoin(context.Background(), ACTIVE); err != nil {
-						return perrors.Wrapf(err, "failed to pick tokens in the KV store, ring: %s", i.RingName)
+						return errors.Wrapf(err, "failed to pick tokens in the KV store, ring: %s", i.RingName)
 					}
 				}
 			}
@@ -480,7 +480,7 @@ func (i *Lifecycler) stopping(runningError error) error {
 		return nil
 	}
 
-	heartbeatTickerStop, heartbeatTickerChan := dstime.NewDisableableTicker(i.cfg.HeartbeatPeriod)
+	heartbeatTickerStop, heartbeatTickerChan := newDisableableTicker(i.cfg.HeartbeatPeriod)
 	defer heartbeatTickerStop()
 
 	// Mark ourselved as Leaving so no more samples are send to us.
@@ -513,9 +513,16 @@ heartbeatLoop:
 
 	if i.ShouldUnregisterOnShutdown() {
 		if err := i.unregister(context.Background()); err != nil {
-			return perrors.Wrapf(err, "failed to unregister from the KV store, ring: %s", i.RingName)
+			return errors.Wrapf(err, "failed to unregister from the KV store, ring: %s", i.RingName)
 		}
 		level.Info(i.logger).Log("msg", "instance removed from the KV store", "ring", i.RingName)
+	}
+
+	if i.cfg.TokensFilePath != "" && i.ClearTokensOnShutdown() {
+		if err := os.Remove(i.cfg.TokensFilePath); err != nil {
+			return errors.Wrapf(err, "failed to delete tokens file %s", i.cfg.TokensFilePath)
+		}
+		level.Info(i.logger).Log("msg", "removed tokens file from disk", "path", i.cfg.TokensFilePath)
 	}
 
 	return nil
@@ -593,6 +600,10 @@ func (i *Lifecycler) initRing(ctx context.Context) error {
 			instanceDesc.State = ACTIVE
 		}
 
+		// We're taking over this entry, update instanceDesc with our values
+		instanceDesc.Addr = i.Addr
+		instanceDesc.Zone = i.Zone
+
 		// We exist in the ring, so assume the ring is right and copy out tokens & state out of there.
 		i.setState(instanceDesc.State)
 		tokens, _ := ringDesc.TokensFor(i.ID)
@@ -600,10 +611,9 @@ func (i *Lifecycler) initRing(ctx context.Context) error {
 
 		level.Info(i.logger).Log("msg", "existing entry found in ring", "state", i.GetState(), "tokens", len(tokens), "ring", i.RingName)
 
-		// Update the ring if the instance has been changed and the heartbeat is disabled.
-		// We dont need to update KV here when heartbeat is enabled as this info will eventually be update on KV
-		// on the next heartbeat
-		if i.cfg.HeartbeatPeriod == 0 && !instanceDesc.Equal(ringDesc.Ingesters[i.ID]) {
+		// Update the ring if the instance has been changed. We don't want to rely on heartbeat update, as heartbeat
+		// can be configured to long time, and until then lifecycler would not report this instance as ready in CheckReady.
+		if !instanceDesc.Equal(ringDesc.Ingesters[i.ID]) {
 			// Update timestamp to give gossiping client a chance register ring change.
 			instanceDesc.Timestamp = time.Now().Unix()
 			ringDesc.Ingesters[i.ID] = instanceDesc
@@ -737,9 +747,13 @@ func (i *Lifecycler) updateConsul(ctx context.Context) error {
 		}
 
 		instanceDesc, ok := ringDesc.Ingesters[i.ID]
+
 		if !ok {
-			// consul must have restarted
-			level.Info(i.logger).Log("msg", "found empty ring, inserting tokens", "ring", i.RingName)
+			// If the instance is missing in the ring, we need to add it back. However, due to how shuffle sharding work,
+			// the missing instance for some period of time could have cause a resharding of tenants among instances:
+			// to guarantee query correctness we need to update the registration timestamp to current time.
+			level.Info(i.logger).Log("msg", "instance is missing in the ring (e.g. the ring backend storage has been reset), registering the instance with an updated registration timestamp", "ring", i.RingName)
+			i.setRegisteredAt(time.Now())
 			ringDesc.AddIngester(i.ID, i.Addr, i.Zone, i.getTokens(), i.GetState(), i.getRegisteredAt())
 		} else {
 			instanceDesc.Timestamp = time.Now().Unix()
@@ -824,8 +838,20 @@ func (i *Lifecycler) SetUnregisterOnShutdown(enabled bool) {
 	i.unregisterOnShutdown.Store(enabled)
 }
 
+// ClearTokensOnShutdown returns if persisted tokens should be cleared on shutdown.
+func (i *Lifecycler) ClearTokensOnShutdown() bool {
+	return i.clearTokensOnShutdown.Load()
+}
+
+// SetClearTokensOnShutdown enables/disables deletions of tokens on shutdown.
+// Set to `true` in case one wants to clear tokens on shutdown which are
+// otherwise persisted, e.g. useful in custom shutdown handlers.
+func (i *Lifecycler) SetClearTokensOnShutdown(enabled bool) {
+	i.clearTokensOnShutdown.Store(enabled)
+}
+
 func (i *Lifecycler) processShutdown(ctx context.Context) {
-	flushRequired := i.flushOnShutdown.Load()
+	flushRequired := i.FlushOnShutdown()
 	transferStart := time.Now()
 	if err := i.flushTransferer.TransferOut(ctx); err != nil {
 		if err == ErrTransferDisabled {
@@ -848,6 +874,23 @@ func (i *Lifecycler) processShutdown(ctx context.Context) {
 	// Sleep so the shutdownDuration metric can be collected.
 	level.Info(i.logger).Log("msg", "lifecycler entering final sleep before shutdown", "final_sleep", i.cfg.FinalSleep)
 	time.Sleep(i.cfg.FinalSleep)
+}
+
+func (i *Lifecycler) casRing(ctx context.Context, f func(in interface{}) (out interface{}, retry bool, err error)) error {
+	return i.KVStore.CAS(ctx, i.RingKey, f)
+}
+
+func (i *Lifecycler) getRing(ctx context.Context) (*Desc, error) {
+	obj, err := i.KVStore.Get(ctx, i.RingKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return GetOrCreateRingDesc(obj), nil
+}
+
+func (i *Lifecycler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	newRingPageHandler(i, i.cfg.HeartbeatTimeout).handle(w, req)
 }
 
 // unregister removes our entry from consul.

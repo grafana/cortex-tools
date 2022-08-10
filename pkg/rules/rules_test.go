@@ -3,7 +3,7 @@ package rules
 import (
 	"testing"
 
-	"github.com/prometheus/prometheus/pkg/rulefmt"
+	"github.com/prometheus/prometheus/model/rulefmt"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v3"
 	"gotest.tools/assert"

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/chroma/quick"
-	"github.com/prometheus/prometheus/pkg/rulefmt"
+	"github.com/prometheus/prometheus/model/rulefmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
