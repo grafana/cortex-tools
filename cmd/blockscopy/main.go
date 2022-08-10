@@ -226,10 +226,7 @@ func copyBlocks(ctx context.Context, cfg config, logger log.Logger, m *metrics) 
 
 				blockDuration := time.Millisecond * time.Duration(meta.MaxTime-meta.MinTime)
 				if blockDuration < cfg.minBlockDuration {
-					minTime := time.Unix(0, meta.MinTime*int64(time.Millisecond)).UTC()
-					maxTime := time.Unix(0, meta.MaxTime*int64(time.Millisecond)).UTC()
-
-					level.Debug(logger).Log("msg", "skipping block, block duration is smaller than minimum duration", "blockDuration", blockDuration, "minimumDuration", cfg.minBlockDuration, "min_time", minTime, "max_time", maxTime)
+					level.Debug(logger).Log("msg", "skipping block, block duration is smaller than minimum duration", "blockDuration", blockDuration, "minimumDuration", cfg.minBlockDuration, "min_time", time.UnixMilli(meta.MinTime).UTC(), "max_time", time.UnixMilli(meta.MaxTime).UTC())
 					return nil
 				}
 			}
