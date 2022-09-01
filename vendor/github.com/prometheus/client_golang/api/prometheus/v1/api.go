@@ -787,7 +787,6 @@ func (h *httpAPI) LabelValues(ctx context.Context, label string, matches []strin
 	}
 
 	u.RawQuery = q.Encode()
-
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, nil, err
@@ -808,13 +807,13 @@ func (h *httpAPI) Query(ctx context.Context, query string, ts time.Time) (model.
 	if !ts.IsZero() {
 		q.Set("time", formatTime(ts))
 	}
-
+	
 	_, body, warnings, err := h.client.DoGetFallback(ctx, u, q)
+	var qres queryResult
 	if err != nil {
 		return nil, warnings, err
 	}
-
-	var qres queryResult
+	
 	return model.Value(qres.v), warnings, json.Unmarshal(body, &qres)
 }
 
@@ -1050,6 +1049,8 @@ func (h *apiClientImpl) URL(ep string, args map[string]string) *url.URL {
 }
 
 func (h *apiClientImpl) Do(ctx context.Context, req *http.Request) (*http.Response, []byte, Warnings, error) {
+	req.Header.Set("X-Scope-OrgID", "appian")
+
 	resp, body, err := h.client.Do(ctx, req)
 	if err != nil {
 		return resp, body, nil, err

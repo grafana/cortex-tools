@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"sort"
@@ -11,7 +12,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 	log "github.com/sirupsen/logrus"
@@ -68,9 +68,10 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 	}
 
 	rt := api.DefaultRoundTripper
-	if cmd.username != "" {
-		rt = config.NewBasicAuthRoundTripper(cmd.username, config.Secret(cmd.password), "", api.DefaultRoundTripper)
-	}
+	// if cmd.username != "" {
+	// 	fmt.Println(cmd.username)
+	// 	rt = config.NewBasicAuthRoundTripper(cmd.username, config.Secret(cmd.password), "", api.DefaultRoundTripper)
+	// }
 	promClient, err := api.NewClient(api.Config{
 		Address:      cmd.address,
 		RoundTripper: rt,
@@ -102,33 +103,37 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		query := "count by (job) (" + metric + ")"
 		result, _, err := v1api.Query(ctx, query, time.Now())
 		if err != nil {
-			return errors.Wrap(err, "error querying "+query)
-		}
+			fmt.Println("error querying used metric "+query)
+			// return errors.Wrap(err, "error querying "+query)
+		} else {
 
-		vec := result.(model.Vector)
-		if len(vec) == 0 {
-			counts := inUseMetrics[metric]
-			counts.totalCount += 0
-			inUseMetrics[metric] = counts
-			log.Debugln("in use", metric, 0)
+			vec := result.(model.Vector)
+			if len(vec) == 0 {
+				counts := inUseMetrics[metric]
+				counts.totalCount += 0
+				inUseMetrics[metric] = counts
+				log.Debugln("in use", metric, 0)
 
-			continue
-		}
-
-		for _, sample := range vec {
-			counts := inUseMetrics[metric]
-			if counts.jobCount == nil {
-				counts.jobCount = make(map[string]int)
+				continue
 			}
 
-			counts.totalCount += int(sample.Value)
-			counts.jobCount[string(sample.Metric["job"])] += int(sample.Value)
-			inUseMetrics[metric] = counts
+			for _, sample := range vec {
+				counts := inUseMetrics[metric]
+				if counts.jobCount == nil {
+					counts.jobCount = make(map[string]int)
+				}
 
-			inUseCardinality += int(sample.Value)
+				counts.totalCount += int(sample.Value)
+				counts.jobCount[string(sample.Metric["job"])] += int(sample.Value)
+				inUseMetrics[metric] = counts
+
+				inUseCardinality += int(sample.Value)
+			}
+
+				log.Debugln("in use", metric, vec[0].Value)
+
 		}
 
-		log.Debugln("in use", metric, vec[0].Value)
 	}
 
 	log.Infof("%d active series are being used in dashboards", inUseCardinality)
@@ -139,6 +144,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		jobCount   map[string]int
 	}{}
 	additionalMetricsCardinality := 0
+
 	for _, metricName := range metricNames {
 		metric := string(metricName)
 		if _, ok := inUseMetrics[metric]; ok {
@@ -151,34 +157,36 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		query := "count by (job) (" + metric + ")"
 		result, _, err := v1api.Query(ctx, query, time.Now())
 		if err != nil {
-			return errors.Wrap(err, "error querying "+query)
-		}
+			fmt.Println("error querying additional metric "+query)
+			// return errors.Wrap(err, "error querying "+query)
+		} else {
 
-		vec := result.(model.Vector)
-		if len(vec) == 0 {
-			counts := additionalMetrics[metric]
-			counts.totalCount += 0
-			additionalMetrics[metric] = counts
+			vec := result.(model.Vector)
+			if len(vec) == 0 {
+				counts := additionalMetrics[metric]
+				counts.totalCount += 0
+				additionalMetrics[metric] = counts
 
-			log.Debugln("additional", metric, 0)
+				log.Debugln("additional", metric, 0)
 
-			continue
-		}
-
-		for _, sample := range vec {
-			counts := additionalMetrics[metric]
-			if counts.jobCount == nil {
-				counts.jobCount = make(map[string]int)
+				continue
 			}
 
-			counts.totalCount += int(sample.Value)
-			counts.jobCount[string(sample.Metric["job"])] += int(sample.Value)
-			additionalMetrics[metric] = counts
+			for _, sample := range vec {
+				counts := additionalMetrics[metric]
+				if counts.jobCount == nil {
+					counts.jobCount = make(map[string]int)
+				}
 
-			additionalMetricsCardinality += int(sample.Value)
+				counts.totalCount += int(sample.Value)
+				counts.jobCount[string(sample.Metric["job"])] += int(sample.Value)
+				additionalMetrics[metric] = counts
+
+				additionalMetricsCardinality += int(sample.Value)
+			}
+
+			log.Debugln("additional", metric, vec[0].Value)
 		}
-
-		log.Debugln("additional", metric, vec[0].Value)
 	}
 
 	log.Infof("%d active series are NOT being used in dashboards", additionalMetricsCardinality)
