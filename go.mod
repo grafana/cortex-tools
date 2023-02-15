@@ -27,12 +27,11 @@ require (
 	github.com/grafana/dskit v0.0.0-20211103155626-4e784973d341
 	github.com/grafana/loki v1.6.2-0.20211108134117-5b9f5b9efaa5
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
-	github.com/oklog/ulid v1.3.1
 	github.com/opentracing-contrib/go-stdlib v1.0.0
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/alertmanager v0.23.1-0.20210914172521-e35efbddb66a
-	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_golang v1.11.1
 	github.com/prometheus/common v0.31.1
 	github.com/prometheus/prometheus v1.8.2-0.20211011171444-354d8d2ecfac
 	github.com/sirupsen/logrus v1.8.1

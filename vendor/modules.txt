@@ -613,7 +613,6 @@ github.com/ncw/swift
 # github.com/oklog/run v1.1.0
 github.com/oklog/run
 # github.com/oklog/ulid v1.3.1
-## explicit
 github.com/oklog/ulid
 # github.com/opentracing-contrib/go-grpc v0.0.0-20210225150812-73cb765af46e
 github.com/opentracing-contrib/go-grpc
@@ -672,7 +671,7 @@ github.com/prometheus/alertmanager/template
 github.com/prometheus/alertmanager/timeinterval
 github.com/prometheus/alertmanager/types
 github.com/prometheus/alertmanager/ui
-# github.com/prometheus/client_golang v1.11.0
+# github.com/prometheus/client_golang v1.11.1
 ## explicit
 github.com/prometheus/client_golang/api
 github.com/prometheus/client_golang/api/prometheus/v1
