@@ -73,4 +73,4 @@ replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-
 
 replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
 
-replace github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
+replace github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220401112130-163cd43fb5e4

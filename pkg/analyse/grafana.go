@@ -2,6 +2,7 @@ package analyse
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -83,10 +84,24 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 		if templateVar.Type != "query" {
 			continue
 		}
-		if query, ok := templateVar.Query.(string); ok {
+
+		query, ok := templateVar.Query.(string)
+		if !ok {
+			iter := reflect.ValueOf(templateVar.Query).MapRange() // A query struct
+			for iter.Next() {
+				key := iter.Key().Interface()
+				value := iter.Value().Interface()
+				if key == "query" {
+					query = value.(string)
+					break
+				}
+			}
+		}
+
+		if query != "" {
 			// label_values
 			if strings.Contains(query, "label_values") {
-				re := regexp.MustCompile(`label_values\(([a-zA-Z0-9_]+)`)
+				re := regexp.MustCompile(`label_values\(\s*([a-zA-Z0-9_]+)`)
 				sm := re.FindStringSubmatch(query)
 				// In case of really gross queries, like - https://github.com/grafana/jsonnet-libs/blob/e97ab17f67ab40d5fe3af7e59151dd43be03f631/hass-mixin/dashboard.libsonnet#L93
 				if len(sm) > 0 {
@@ -113,9 +128,22 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 	}
 	return parseErrors
 }
-
 func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 	var parseErrors []error
+
+	switch panel.CommonPanel.Type {
+	case
+		"row",
+		"welcome",
+		"dashlist",
+		"news",
+		"annolist",
+		"alertlist",
+		"pluginlist",
+		"grafana-clock-panel",
+		"text":
+		return parseErrors // Let's not throw parse errors...these don't contain queries!
+	}
 
 	targets := panel.GetTargets()
 	if targets == nil {
@@ -141,6 +169,15 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 }
 
 func parseQuery(query string, metrics map[string]struct{}) error {
+	re := regexp.MustCompile(`\[\s*\$(\w+|{\w+})\]`) // variable rate interval
+	query = re.ReplaceAllString(query, "[1s]")
+
+	re1 := regexp.MustCompile(`offset\s+\$(\w+|{\w+})`) // variable offset
+	query = re1.ReplaceAllString(query, "offset 1s")
+
+	re2 := regexp.MustCompile(`(by\s*\()\$((\w+|{\w+}))`) // variable by clause
+	query = re2.ReplaceAllString(query, "$1$2")
+
 	query = strings.ReplaceAll(query, `$__interval`, "5m")
 	query = strings.ReplaceAll(query, `$interval`, "5m")
 	query = strings.ReplaceAll(query, `$resolution`, "5s")
@@ -148,6 +185,15 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 	query = strings.ReplaceAll(query, "$__range", "1d")
 	query = strings.ReplaceAll(query, "${__range_s:glob}", "30")
 	query = strings.ReplaceAll(query, "${__range_s}", "30")
+
+	re3 := regexp.MustCompile(`\$(__(to|from):date:\w+\b|{__(to|from):date:\w+})`)
+	query = re3.ReplaceAllString(query, "12") // Replace dates
+
+	// Replace *all* variables.  Magic number 79197919 is used as it's unlikely to appear in a query.  Some queries have
+	// variable metric names. There is a check a few lines below for this edge case.
+	re4 := regexp.MustCompile(`\$(\w+|{\w+})`)
+	query = re4.ReplaceAllString(query, "79197919")
+
 	expr, err := parser.ParseExpr(query)
 	if err != nil {
 		return err
@@ -155,6 +201,9 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
 		if n, ok := node.(*parser.VectorSelector); ok {
+			if strings.Contains(n.Name, "79197919") { // Check for the magic number in the metric name..drop it
+				return errors.New("Query contains a variable in the metric name")
+			}
 			metrics[n.Name] = struct{}{}
 		}
 
