@@ -103,7 +103,7 @@ func (r *CortexClient) Query(ctx context.Context, query string) (*http.Response,
 	query = fmt.Sprintf("query=%s&time=%d", query, time.Now().Unix())
 	escapedQuery := url.PathEscape(query)
 
-	res, err := r.doRequest("/api/prom/api/v1/query?"+escapedQuery, "GET", nil)
+	res, err := r.doRequest(ctx, "/api/prom/api/v1/query?"+escapedQuery, "GET", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +111,8 @@ func (r *CortexClient) Query(ctx context.Context, query string) (*http.Response,
 	return res, nil
 }
 
-func (r *CortexClient) doRequest(path, method string, payload []byte) (*http.Response, error) {
-	req, err := buildRequest(path, method, *r.endpoint, payload)
+func (r *CortexClient) doRequest(ctx context.Context, path, method string, payload []byte) (*http.Response, error) {
+	req, err := buildRequest(ctx, path, method, *r.endpoint, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func joinPath(baseURLPath, targetPath string) string {
 	return strings.TrimSuffix(baseURLPath, "/") + targetPath
 }
 
-func buildRequest(p, m string, endpoint url.URL, payload []byte) (*http.Request, error) {
+func buildRequest(ctx context.Context, p, m string, endpoint url.URL, payload []byte) (*http.Request, error) {
 	// parse path parameter again (as it already contains escaped path information
 	pURL, err := url.Parse(p)
 	if err != nil {
@@ -217,5 +217,5 @@ func buildRequest(p, m string, endpoint url.URL, payload []byte) (*http.Request,
 		endpoint.RawPath = joinPath(endpoint.EscapedPath(), pURL.EscapedPath())
 	}
 	endpoint.Path = joinPath(endpoint.Path, pURL.Path)
-	return http.NewRequest(m, endpoint.String(), bytes.NewBuffer(payload))
+	return http.NewRequestWithContext(ctx, m, endpoint.String(), bytes.NewBuffer(payload))
 }

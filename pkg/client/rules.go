@@ -23,7 +23,7 @@ func (r *CortexClient) CreateRuleGroup(ctx context.Context, namespace string, rg
 	escapedNamespace := url.PathEscape(namespace)
 	path := r.apiPath + "/" + escapedNamespace
 
-	res, err := r.doRequest(path, "POST", payload)
+	res, err := r.doRequest(ctx, path, "POST", payload)
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func (r *CortexClient) DeleteRuleGroup(ctx context.Context, namespace, groupName
 	escapedGroupName := url.PathEscape(groupName)
 	path := r.apiPath + "/" + escapedNamespace + "/" + escapedGroupName
 
-	res, err := r.doRequest(path, "DELETE", nil)
+	res, err := r.doRequest(ctx, path, "DELETE", nil)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func (r *CortexClient) GetRuleGroup(ctx context.Context, namespace, groupName st
 	path := r.apiPath + "/" + escapedNamespace + "/" + escapedGroupName
 
 	fmt.Println(path)
-	res, err := r.doRequest(path, "GET", nil)
+	res, err := r.doRequest(ctx, path, "GET", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (r *CortexClient) ListRules(ctx context.Context, namespace string) (map[str
 		path = path + "/" + namespace
 	}
 
-	res, err := r.doRequest(path, "GET", nil)
+	res, err := r.doRequest(ctx, path, "GET", nil)
 	if err != nil {
 		return nil, err
 	}
