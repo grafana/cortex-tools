@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"sort"
@@ -94,7 +95,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		jobCount   map[string]int
 	}{}
 	inUseCardinality := 0
-
+	var errorMetrics []string
 	for _, metric := range metricsUsed {
 		ctx, cancel := context.WithTimeout(context.Background(), cmd.readTimeout)
 		defer cancel()
@@ -102,7 +103,10 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		query := "count by (job) (" + metric + ")"
 		result, _, err := v1api.Query(ctx, query, time.Now())
 		if err != nil {
-			return errors.Wrap(err, "error querying "+query)
+			errStr := fmt.Sprintf("error querying %v: %s", query, err.Error())
+			log.Warnln(errStr)
+			errorMetrics = append(errorMetrics, errStr)
+			continue
 		}
 
 		vec := result.(model.Vector)
@@ -151,7 +155,10 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		query := "count by (job) (" + metric + ")"
 		result, _, err := v1api.Query(ctx, query, time.Now())
 		if err != nil {
-			return errors.Wrap(err, "error querying "+query)
+			errStr := fmt.Sprintf("error querying %v: %s", query, err.Error())
+			log.Warnln(errStr)
+			errorMetrics = append(errorMetrics, errStr)
+			continue
 		}
 
 		vec := result.(model.Vector)
@@ -187,6 +194,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 	output.TotalActiveSeries = inUseCardinality + additionalMetricsCardinality
 	output.InUseActiveSeries = inUseCardinality
 	output.AdditionalActiveSeries = additionalMetricsCardinality
+	output.Errors = errorMetrics
 
 	for metric, counts := range inUseMetrics {
 		jobCounts := make([]analyse.JobCount, 0, len(counts.jobCount))
