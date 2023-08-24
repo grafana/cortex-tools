@@ -276,6 +276,12 @@ func TestLintExpressions(t *testing.T) {
 			logql: true,
 			err:   "parse error at line 1, col 31: syntax error: unexpected %, expecting } or ,",
 		},
+		{
+			name:  "logql vector expression",
+			expr:  `count(count_over_time({foo="bar"}[1m])) or vector(1)`,
+			count: 0, modified: 0,
+			logql: true,
+		},
 	}
 
 	for _, tc := range tt {
