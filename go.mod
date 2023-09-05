@@ -13,7 +13,7 @@ require (
 	github.com/google/go-github/v32 v32.1.0
 	github.com/gorilla/mux v1.8.0
 	github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
-	github.com/grafana/dskit v0.0.0-20230829141140-06955c011ffd
+	github.com/grafana/dskit v0.0.0-20230905112532-e4f33b342cb6
 	github.com/grafana/loki v1.6.2-0.20230905071424-a60c1777ce15
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing-contrib/go-stdlib v1.0.0
