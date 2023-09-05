@@ -1,7 +1,7 @@
 // Copyright (c) 2012 The gocql Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-//This file will be the future home for more policies
+// This file will be the future home for more policies
 package gocql
 
 import (
@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
 	"github.com/hailocab/go-hostpool"
 )
 
@@ -166,12 +166,11 @@ type RetryPolicy interface {
 //
 // See below for examples of usage:
 //
-//     //Assign to the cluster
-//     cluster.RetryPolicy = &gocql.SimpleRetryPolicy{NumRetries: 3}
+//	//Assign to the cluster
+//	cluster.RetryPolicy = &gocql.SimpleRetryPolicy{NumRetries: 3}
 //
-//     //Assign to a query
-//     query.RetryPolicy(&gocql.SimpleRetryPolicy{NumRetries: 1})
-//
+//	//Assign to a query
+//	query.RetryPolicy(&gocql.SimpleRetryPolicy{NumRetries: 1})
 type SimpleRetryPolicy struct {
 	NumRetries int //Number of times to retry a query
 }
@@ -657,14 +656,13 @@ func (t *tokenAwareHostPolicy) Pick(qry ExecutableQuery) NextHost {
 // use an empty slice of hosts as the hostpool will be populated later by gocql.
 // See below for examples of usage:
 //
-//     // Create host selection policy using a simple host pool
-//     cluster.PoolConfig.HostSelectionPolicy = HostPoolHostPolicy(hostpool.New(nil))
+//	// Create host selection policy using a simple host pool
+//	cluster.PoolConfig.HostSelectionPolicy = HostPoolHostPolicy(hostpool.New(nil))
 //
-//     // Create host selection policy using an epsilon greedy pool
-//     cluster.PoolConfig.HostSelectionPolicy = HostPoolHostPolicy(
-//         hostpool.NewEpsilonGreedy(nil, 0, &hostpool.LinearEpsilonValueCalculator{}),
-//     )
-//
+//	// Create host selection policy using an epsilon greedy pool
+//	cluster.PoolConfig.HostSelectionPolicy = HostPoolHostPolicy(
+//	    hostpool.NewEpsilonGreedy(nil, 0, &hostpool.LinearEpsilonValueCalculator{}),
+//	)
 func HostPoolHostPolicy(hp hostpool.HostPool) HostSelectionPolicy {
 	return &hostPoolHostPolicy{hostMap: map[string]*HostInfo{}, hp: hp}
 }
@@ -904,7 +902,6 @@ func (e *SimpleConvictionPolicy) Reset(host *HostInfo) {}
 // ReconnectionPolicy interface is used by gocql to determine if reconnection
 // can be attempted after connection error. The interface allows gocql users
 // to implement their own logic to determine how to attempt reconnection.
-//
 type ReconnectionPolicy interface {
 	GetInterval(currentRetry int) time.Duration
 	GetMaxRetries() int
@@ -914,8 +911,7 @@ type ReconnectionPolicy interface {
 //
 // Examples of usage:
 //
-//     cluster.ReconnectionPolicy = &gocql.ConstantReconnectionPolicy{MaxRetries: 10, Interval: 8 * time.Second}
-//
+//	cluster.ReconnectionPolicy = &gocql.ConstantReconnectionPolicy{MaxRetries: 10, Interval: 8 * time.Second}
 type ConstantReconnectionPolicy struct {
 	MaxRetries int
 	Interval   time.Duration
