@@ -5,7 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"sync"
 	"time"
 
@@ -110,7 +110,7 @@ func NewRunner(cfg RunnerConfig, logger log.Logger) (*Runner, error) {
 
 	var amConfig []byte
 	if cfg.AlertmanagerConfigFile != "" {
-		amConfig, err = ioutil.ReadFile(cfg.AlertmanagerConfigFile)
+		amConfig, err = os.ReadFile(cfg.AlertmanagerConfigFile)
 		if err != nil {
 			return nil, fmt.Errorf("unable to read Alertmanager configuration file %q: %s", cfg.AlertmanagerConfigFile, err)
 		}
@@ -119,7 +119,7 @@ func NewRunner(cfg RunnerConfig, logger log.Logger) (*Runner, error) {
 
 	var rulerConfig rwrulefmt.RuleGroup
 	if cfg.RulesConfigFile != "" {
-		b, err := ioutil.ReadFile(cfg.RulesConfigFile)
+		b, err := os.ReadFile(cfg.RulesConfigFile)
 		if err != nil {
 			return nil, fmt.Errorf("unable to read Rules configuration file %q: %s", cfg.RulesConfigFile, err)
 		}

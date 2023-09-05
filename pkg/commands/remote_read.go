@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"net/http"
 	"net/url"
@@ -385,10 +384,7 @@ func (c *RemoteReadCommand) export(k *kingpin.ParseContext) error {
 	}
 
 	if c.tsdbPath == "" {
-		c.tsdbPath, err = ioutil.TempDir("", "cortextool-tsdb")
-		if err != nil {
-			return err
-		}
+		c.tsdbPath = os.TempDir()
 		log.Infof("Created TSDB in path '%s'", c.tsdbPath)
 	} else {
 		if _, err := os.Stat(c.tsdbPath); err != nil && os.IsNotExist(err) {

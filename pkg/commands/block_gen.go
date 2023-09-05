@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"sort"
 	"time"
@@ -55,11 +54,7 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	}
 
 	if f.Cfg.BlockDir == "" {
-		var err error
-		f.Cfg.BlockDir, err = ioutil.TempDir("", "mockdata")
-		if err != nil {
-			return errors.Wrap(err, "failed to create tmp dir")
-		}
+		f.Cfg.BlockDir = os.TempDir()
 	}
 
 	seriesSet, totalSeriesTypeMap := bench.SeriesDescToSeries(f.Series)

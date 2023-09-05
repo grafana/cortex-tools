@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -70,7 +69,7 @@ func (o *OverridesExporterCommand) updateOverridesMetrics() error {
 	overrides := &struct {
 		TenantLimits map[string]*validation.Limits `yaml:"overrides"`
 	}{}
-	bytes, err := ioutil.ReadFile(o.overridesFilePath)
+	bytes, err := os.ReadFile(o.overridesFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to update overrides, err: %w", err)
 	}
@@ -92,7 +91,7 @@ func (o *OverridesExporterCommand) updatePresetsMetrics() error {
 	presets := &struct {
 		Presets map[string]*validation.Limits `yaml:"presets"`
 	}{}
-	bytes, err := ioutil.ReadFile(o.presetsFilePath)
+	bytes, err := os.ReadFile(o.presetsFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to update presets, error reading file: %w", err)
 	}

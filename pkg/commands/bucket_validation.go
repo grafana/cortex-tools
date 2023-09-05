@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -245,7 +244,7 @@ func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error
 			return errors.Wrapf(err, "failed to get object (%s)", objectPath)
 		}
 
-		content, err := ioutil.ReadAll(reader)
+		content, err := io.ReadAll(reader)
 		if err != nil {
 			return errors.Wrapf(err, "failed to read object (%s)", objectPath)
 		}
