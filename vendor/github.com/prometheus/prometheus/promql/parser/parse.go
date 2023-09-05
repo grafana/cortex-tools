@@ -14,6 +14,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -23,11 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/timestamp"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/util/strutil"
 )
 
@@ -224,7 +224,7 @@ func ParseSeriesDesc(input string) (labels labels.Labels, values []SequenceValue
 
 // addParseErrf formats the error and appends it to the list of parsing errors.
 func (p *parser) addParseErrf(positionRange PositionRange, format string, args ...interface{}) {
-	p.addParseErr(positionRange, errors.Errorf(format, args...))
+	p.addParseErr(positionRange, fmt.Errorf(format, args...))
 }
 
 // addParseErr appends the provided error to the list of parsing errors.
@@ -241,7 +241,7 @@ func (p *parser) addParseErr(positionRange PositionRange, err error) {
 // unexpected creates a parser error complaining about an unexpected lexer item.
 // The item that is presented as unexpected is always the last item produced
 // by the lexer.
-func (p *parser) unexpected(context string, expected string) {
+func (p *parser) unexpected(context, expected string) {
 	var errMsg strings.Builder
 
 	// Do not report lexer errors twice
@@ -270,14 +270,15 @@ var errUnexpected = errors.New("unexpected error")
 // recover is the handler that turns panics into returns from the top level of Parse.
 func (p *parser) recover(errp *error) {
 	e := recover()
-	if _, ok := e.(runtime.Error); ok {
+	switch _, ok := e.(runtime.Error); {
+	case ok:
 		// Print the stack trace but do not inhibit the running application.
 		buf := make([]byte, 64<<10)
 		buf = buf[:runtime.Stack(buf, false)]
 
 		fmt.Fprintf(os.Stderr, "parser panic: %v\n%s", e, buf)
 		*errp = errUnexpected
-	} else if e != nil {
+	case e != nil:
 		*errp = e.(error)
 	}
 }
@@ -332,7 +333,7 @@ func (p *parser) Lex(lval *yySymType) int {
 // It is a no-op since the parsers error routines are triggered
 // by mechanisms that allow more fine-grained control
 // For more information, see https://pkg.go.dev/golang.org/x/tools/cmd/goyacc.
-func (p *parser) Error(e string) {
+func (p *parser) Error(string) {
 }
 
 // InjectItem allows injecting a single Item at the beginning of the token stream
@@ -354,7 +355,8 @@ func (p *parser) InjectItem(typ ItemType) {
 	p.inject = typ
 	p.injecting = true
 }
-func (p *parser) newBinaryExpression(lhs Node, op Item, modifiers Node, rhs Node) *BinaryExpr {
+
+func (p *parser) newBinaryExpression(lhs Node, op Item, modifiers, rhs Node) *BinaryExpr {
 	ret := modifiers.(*BinaryExpr)
 
 	ret.LHS = lhs.(Expr)
@@ -374,7 +376,7 @@ func (p *parser) assembleVectorSelector(vs *VectorSelector) {
 	}
 }
 
-func (p *parser) newAggregateExpr(op Item, modifier Node, args Node) (ret *AggregateExpr) {
+func (p *parser) newAggregateExpr(op Item, modifier, args Node) (ret *AggregateExpr) {
 	ret = modifier.(*AggregateExpr)
 	arguments := args.(Expressions)
 
@@ -431,7 +433,7 @@ func (p *parser) expectType(node Node, want ValueType, context string) {
 	}
 }
 
-// checkAST checks the sanity of the provided AST. This includes type checking.
+// checkAST checks the validity of the provided AST. This includes type checking.
 func (p *parser) checkAST(node Node) (typ ValueType) {
 	// For expressions the type is determined by their Type function.
 	// Lists do not have a type but are not invalid either.
@@ -480,9 +482,9 @@ func (p *parser) checkAST(node Node) (typ ValueType) {
 		// This is made a function instead of a variable, so it is lazily evaluated on demand.
 		opRange := func() (r PositionRange) {
 			// Remove whitespace at the beginning and end of the range.
-			for r.Start = n.LHS.PositionRange().End; isSpace(rune(p.lex.input[r.Start])); r.Start++ {
+			for r.Start = n.LHS.PositionRange().End; isSpace(rune(p.lex.input[r.Start])); r.Start++ { // nolint:revive
 			}
-			for r.End = n.RHS.PositionRange().Start - 1; isSpace(rune(p.lex.input[r.End])); r.End-- {
+			for r.End = n.RHS.PositionRange().Start - 1; isSpace(rune(p.lex.input[r.End])); r.End-- { // nolint:revive
 			}
 			return
 		}
@@ -517,20 +519,18 @@ func (p *parser) checkAST(node Node) (typ ValueType) {
 			p.addParseErrf(n.RHS.PositionRange(), "binary expression must contain only scalar and instant vector types")
 		}
 
-		if (lt != ValueTypeVector || rt != ValueTypeVector) && n.VectorMatching != nil {
+		switch {
+		case (lt != ValueTypeVector || rt != ValueTypeVector) && n.VectorMatching != nil:
 			if len(n.VectorMatching.MatchingLabels) > 0 {
 				p.addParseErrf(n.PositionRange(), "vector matching only allowed between instant vectors")
 			}
 			n.VectorMatching = nil
-		} else {
-			// Both operands are Vectors.
-			if n.Op.IsSetOperator() {
-				if n.VectorMatching.Card == CardOneToMany || n.VectorMatching.Card == CardManyToOne {
-					p.addParseErrf(n.PositionRange(), "no grouping allowed for %q operation", n.Op)
-				}
-				if n.VectorMatching.Card != CardManyToMany {
-					p.addParseErrf(n.PositionRange(), "set operations must always be many-to-many")
-				}
+		case n.Op.IsSetOperator(): // Both operands are Vectors.
+			if n.VectorMatching.Card == CardOneToMany || n.VectorMatching.Card == CardManyToOne {
+				p.addParseErrf(n.PositionRange(), "no grouping allowed for %q operation", n.Op)
+			}
+			if n.VectorMatching.Card != CardManyToMany {
+				p.addParseErrf(n.PositionRange(), "set operations must always be many-to-many")
 			}
 		}
 
@@ -650,10 +650,9 @@ func (p *parser) parseGenerated(startSymbol ItemType) interface{} {
 	p.yyParser.Parse(p)
 
 	return p.generatedParserResult
-
 }
 
-func (p *parser) newLabelMatcher(label Item, operator Item, value Item) *labels.Matcher {
+func (p *parser) newLabelMatcher(label, operator, value Item) *labels.Matcher {
 	op := operator.Typ
 	val := p.unquoteString(value.Val)
 
@@ -708,9 +707,10 @@ func (p *parser) addOffset(e Node, offset time.Duration) {
 	}
 
 	// it is already ensured by parseDuration func that there never will be a zero offset modifier
-	if *orgoffsetp != 0 {
+	switch {
+	case *orgoffsetp != 0:
 		p.addParseErrf(e.PositionRange(), "offset may not be set multiple times")
-	} else if orgoffsetp != nil {
+	case orgoffsetp != nil:
 		*orgoffsetp = offset
 	}
 
@@ -801,7 +801,7 @@ func MustLabelMatcher(mt labels.MatchType, name, val string) *labels.Matcher {
 func MustGetFunction(name string) *Function {
 	f, ok := getFunction(name)
 	if !ok {
-		panic(errors.Errorf("function %q does not exist", name))
+		panic(fmt.Errorf("function %q does not exist", name))
 	}
 	return f
 }

@@ -1,56 +1,53 @@
 package iter
 
 import (
-	"container/heap"
 	"context"
 	"io"
+	"math"
 	"sync"
 	"time"
 
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logqlmodel/stats"
 	"github.com/grafana/loki/pkg/util"
+	"github.com/grafana/loki/pkg/util/loser"
 )
 
 // EntryIterator iterates over entries in time-order.
 type EntryIterator interface {
-	Next() bool
+	Iterator
 	Entry() logproto.Entry
-	Labels() string
-	Error() error
-	Close() error
 }
 
-type noOpIterator struct{}
+type EntryIteratorOptions struct {
+	KeepStructuredMetdata bool
+}
 
-var NoopIterator = noOpIterator{}
+type EntryIteratorOption func(*EntryIteratorOptions)
 
-func (noOpIterator) Next() bool              { return false }
-func (noOpIterator) Error() error            { return nil }
-func (noOpIterator) Labels() string          { return "" }
-func (noOpIterator) Entry() logproto.Entry   { return logproto.Entry{} }
-func (noOpIterator) Sample() logproto.Sample { return logproto.Sample{} }
-func (noOpIterator) Close() error            { return nil }
+func WithKeepStructuredMetadata() EntryIteratorOption {
+	return func(o *EntryIteratorOptions) {
+		o.KeepStructuredMetdata = true
+	}
+}
 
 // streamIterator iterates over entries in a stream.
 type streamIterator struct {
-	i       int
-	entries []logproto.Entry
-	labels  string
+	i      int
+	stream logproto.Stream
 }
 
 // NewStreamIterator iterates over entries in a stream.
 func NewStreamIterator(stream logproto.Stream) EntryIterator {
 	return &streamIterator{
-		i:       -1,
-		entries: stream.Entries,
-		labels:  stream.Labels,
+		i:      -1,
+		stream: stream,
 	}
 }
 
 func (i *streamIterator) Next() bool {
 	i.i++
-	return i.i < len(i.entries)
+	return i.i < len(i.stream.Entries)
 }
 
 func (i *streamIterator) Error() error {
@@ -58,72 +55,17 @@ func (i *streamIterator) Error() error {
 }
 
 func (i *streamIterator) Labels() string {
-	return i.labels
+	return i.stream.Labels
 }
 
+func (i *streamIterator) StreamHash() uint64 { return i.stream.Hash }
+
 func (i *streamIterator) Entry() logproto.Entry {
-	return i.entries[i.i]
+	return i.stream.Entries[i.i]
 }
 
 func (i *streamIterator) Close() error {
 	return nil
-}
-
-type iteratorHeap []EntryIterator
-
-func (h iteratorHeap) Len() int            { return len(h) }
-func (h iteratorHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h iteratorHeap) Peek() EntryIterator { return h[0] }
-func (h *iteratorHeap) Push(x interface{}) {
-	*h = append(*h, x.(EntryIterator))
-}
-
-func (h *iteratorHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
-
-type iteratorMinHeap struct {
-	iteratorHeap
-}
-
-func (h iteratorMinHeap) Less(i, j int) bool {
-	t1, t2 := h.iteratorHeap[i].Entry().Timestamp, h.iteratorHeap[j].Entry().Timestamp
-
-	un1 := t1.UnixNano()
-	un2 := t2.UnixNano()
-
-	switch {
-	case un1 < un2:
-		return true
-	case un1 > un2:
-		return false
-	default: // un1 == un2:
-		return h.iteratorHeap[i].Labels() < h.iteratorHeap[j].Labels()
-	}
-}
-
-type iteratorMaxHeap struct {
-	iteratorHeap
-}
-
-func (h iteratorMaxHeap) Less(i, j int) bool {
-	t1, t2 := h.iteratorHeap[i].Entry().Timestamp, h.iteratorHeap[j].Entry().Timestamp
-
-	un1 := t1.UnixNano()
-	un2 := t2.UnixNano()
-
-	switch {
-	case un1 < un2:
-		return false
-	case un1 > un2:
-		return true
-	default: // un1 == un2
-		return h.iteratorHeap[i].Labels() < h.iteratorHeap[j].Labels()
-	}
 }
 
 // HeapIterator iterates over a heap of iterators with ability to push new iterators and get some properties like time of entry at peek and len
@@ -131,153 +73,129 @@ func (h iteratorMaxHeap) Less(i, j int) bool {
 type HeapIterator interface {
 	EntryIterator
 	Peek() time.Time
-	Len() int
+	IsEmpty() bool
 	Push(EntryIterator)
 }
 
-// heapIterator iterates over a heap of iterators.
-type heapIterator struct {
-	heap interface {
-		heap.Interface
-		Peek() EntryIterator
-	}
-	is         []EntryIterator
-	prefetched bool
-	stats      *stats.ChunkData
+// mergeEntryIterator iterates over a heap of iterators and merge duplicate entries.
+type mergeEntryIterator struct {
+	tree  *loser.Tree[sortFields, EntryIterator]
+	stats *stats.Context
 
-	tuples     []tuple
-	currEntry  logproto.Entry
-	currLabels string
-	errs       []error
+	// buffer of entries to be returned by Next()
+	// We buffer entries with the same timestamp to correctly dedupe them.
+	buffer    []entryWithLabels
+	currEntry entryWithLabels
+	errs      []error
 }
 
-// NewHeapIterator returns a new iterator which uses a heap to merge together
-// entries for multiple interators.
-func NewHeapIterator(ctx context.Context, is []EntryIterator, direction logproto.Direction) HeapIterator {
-	result := &heapIterator{is: is, stats: stats.GetChunkData(ctx)}
-	switch direction {
-	case logproto.BACKWARD:
-		result.heap = &iteratorMaxHeap{}
-	case logproto.FORWARD:
-		result.heap = &iteratorMinHeap{}
-	default:
-		panic("bad direction")
-	}
-
-	result.tuples = make([]tuple, 0, len(is))
+// NewMergeEntryIterator returns a new iterator which uses a heap to merge together entries for multiple iterators and deduplicate entries if any.
+// The iterator only order and merge entries across given `is` iterators, it does not merge entries within individual iterator.
+// This means using this iterator with a single iterator will result in the same result as the input iterator.
+// If you don't need to deduplicate entries, use `NewSortEntryIterator` instead.
+func NewMergeEntryIterator(ctx context.Context, is []EntryIterator, direction logproto.Direction) HeapIterator {
+	maxVal, less := treeLess(direction)
+	result := &mergeEntryIterator{stats: stats.FromContext(ctx)}
+	result.tree = loser.New(is, maxVal, sortFieldsAt, less, result.closeEntry)
+	result.buffer = make([]entryWithLabels, 0, len(is))
 	return result
 }
 
-// prefetch iterates over all inner iterators to merge together, calls Next() on
-// each of them to prefetch the first entry and pushes of them - who are not
-// empty - to the heap
-func (i *heapIterator) prefetch() {
-	if i.prefetched {
-		return
-	}
-
-	i.prefetched = true
-	for _, it := range i.is {
-		i.requeue(it, false)
-	}
-
-	// We can now clear the list of input iterators to merge, given they have all
-	// been processed and the non empty ones have been pushed to the heap
-	i.is = nil
-}
-
-// requeue pushes the input ei EntryIterator to the heap, advancing it via an ei.Next()
-// call unless the advanced input parameter is true. In this latter case it expects that
-// the iterator has already been advanced before calling requeue().
-//
-// If the iterator has no more entries or an error occur while advancing it, the iterator
-// is not pushed to the heap and any possible error captured, so that can be get via Error().
-func (i *heapIterator) requeue(ei EntryIterator, advanced bool) {
-	if advanced || ei.Next() {
-		heap.Push(i.heap, ei)
-		return
-	}
-
-	if err := ei.Error(); err != nil {
+func (i *mergeEntryIterator) closeEntry(e EntryIterator) {
+	if err := e.Error(); err != nil {
 		i.errs = append(i.errs, err)
 	}
-	util.LogError("closing iterator", ei.Close)
+	util.LogError("closing iterator", e.Close)
+
 }
 
-func (i *heapIterator) Push(ei EntryIterator) {
-	i.requeue(ei, false)
+func (i *mergeEntryIterator) Push(ei EntryIterator) {
+	i.tree.Push(ei)
 }
 
-type tuple struct {
-	logproto.Entry
-	EntryIterator
-}
-
-func (i *heapIterator) Next() bool {
-	i.prefetch()
-
-	if i.heap.Len() == 0 {
+// Next fetches entries from the tree until it finds an entry with a different timestamp or stream hash.
+// Generally i.buffer has one or more entries with the same timestamp and stream hash,
+// followed by one more item where the timestamp or stream hash was different.
+func (i *mergeEntryIterator) Next() bool {
+	if len(i.buffer) < 2 {
+		i.fillBuffer()
+	}
+	if len(i.buffer) == 0 {
 		return false
 	}
+	i.nextFromBuffer()
 
-	// We support multiple entries with the same timestamp, and we want to
-	// preserve their original order. We look at all the top entries in the
-	// heap with the same timestamp, and pop the ones whose common value
-	// occurs most often.
-	for i.heap.Len() > 0 {
-		next := i.heap.Peek()
-		entry := next.Entry()
-		if len(i.tuples) > 0 && (i.tuples[0].Labels() != next.Labels() || !i.tuples[0].Timestamp.Equal(entry.Timestamp)) {
-			break
-		}
-
-		heap.Pop(i.heap)
-		i.tuples = append(i.tuples, tuple{
-			Entry:         entry,
-			EntryIterator: next,
-		})
-	}
-
-	// shortcut if we have a single tuple.
-	if len(i.tuples) == 1 {
-		i.currEntry = i.tuples[0].Entry
-		i.currLabels = i.tuples[0].Labels()
-		i.requeue(i.tuples[0].EntryIterator, false)
-		i.tuples = i.tuples[:0]
-		return true
-	}
-
-	// Find in tuples which entry occurs most often which, due to quorum based
-	// replication, is guaranteed to be the correct next entry.
-	t := i.tuples[0]
-	i.currEntry = t.Entry
-	i.currLabels = t.Labels()
-
-	// Requeue the iterators, advancing them if they were consumed.
-	for j := range i.tuples {
-		if i.tuples[j].Line != i.currEntry.Line {
-			i.requeue(i.tuples[j].EntryIterator, true)
-			continue
-		}
-		// we count as duplicates only if the tuple is not the one (t) used to fill the current entry
-		if i.tuples[j] != t {
-			i.stats.TotalDuplicates++
-		}
-		i.requeue(i.tuples[j].EntryIterator, false)
-	}
-	i.tuples = i.tuples[:0]
 	return true
 }
 
-func (i *heapIterator) Entry() logproto.Entry {
-	return i.currEntry
+func (i *mergeEntryIterator) fillBuffer() {
+	if !i.tree.Next() {
+		return
+	}
+	// At this point we have zero or one items in i.buffer, and the next item is available from i.tree.
+
+	// We support multiple entries with the same timestamp, and we want to
+	// preserve their original order.
+	// Entries with identical timestamp and line are removed as duplicates.
+	for {
+		next := i.tree.Winner()
+		entry := next.Entry()
+		i.buffer = append(i.buffer, entryWithLabels{
+			Entry:      entry,
+			labels:     next.Labels(),
+			streamHash: next.StreamHash(),
+		})
+		if len(i.buffer) > 1 &&
+			(i.buffer[0].streamHash != next.StreamHash() ||
+				!i.buffer[0].Entry.Timestamp.Equal(entry.Timestamp)) {
+			break
+		}
+		previous := i.buffer[:len(i.buffer)-1]
+
+		var dupe bool
+		for _, t := range previous {
+			if t.Entry.Line == entry.Line {
+				i.stats.AddDuplicates(1)
+				dupe = true
+				break
+			}
+		}
+		if dupe {
+			i.buffer = previous
+		}
+		if !i.tree.Next() {
+			break
+		}
+	}
 }
 
-func (i *heapIterator) Labels() string {
-	return i.currLabels
+func (i *mergeEntryIterator) nextFromBuffer() {
+	i.currEntry.Entry = i.buffer[0].Entry
+	i.currEntry.labels = i.buffer[0].labels
+	i.currEntry.streamHash = i.buffer[0].streamHash
+	if len(i.buffer) == 2 {
+		i.buffer[0] = i.buffer[1]
+		i.buffer = i.buffer[:1]
+		return
+	}
+	if len(i.buffer) == 1 {
+		i.buffer = i.buffer[:0]
+		return
+	}
+	i.buffer = i.buffer[1:]
 }
 
-func (i *heapIterator) Error() error {
+func (i *mergeEntryIterator) Entry() logproto.Entry {
+	return i.currEntry.Entry
+}
+
+func (i *mergeEntryIterator) Labels() string {
+	return i.currEntry.labels
+}
+
+func (i *mergeEntryIterator) StreamHash() uint64 { return i.currEntry.streamHash }
+
+func (i *mergeEntryIterator) Error() error {
 	switch len(i.errs) {
 	case 0:
 		return nil
@@ -288,45 +206,163 @@ func (i *heapIterator) Error() error {
 	}
 }
 
-func (i *heapIterator) Close() error {
-	for i.heap.Len() > 0 {
-		if err := i.heap.Pop().(EntryIterator).Close(); err != nil {
-			return err
-		}
+func (i *mergeEntryIterator) Close() error {
+	i.tree.Close()
+	i.buffer = nil
+	return i.Error()
+}
+
+func (i *mergeEntryIterator) Peek() time.Time {
+	if len(i.buffer) == 0 {
+		i.fillBuffer()
 	}
-	i.tuples = nil
-	return nil
+	if len(i.buffer) == 0 {
+		return time.Time{}
+	}
+	return i.buffer[0].Timestamp
 }
 
-func (i *heapIterator) Peek() time.Time {
-	i.prefetch()
-
-	return i.heap.Peek().Entry().Timestamp
+// IsEmpty returns true if there are no more entries to pull.
+func (i *mergeEntryIterator) IsEmpty() bool {
+	if len(i.buffer) == 0 {
+		i.fillBuffer()
+	}
+	return len(i.buffer) == 0
 }
 
-// Len returns the number of inner iterators on the heap, still having entries
-func (i *heapIterator) Len() int {
-	i.prefetch()
+type entrySortIterator struct {
+	tree      *loser.Tree[sortFields, EntryIterator]
+	currEntry entryWithLabels
+	errs      []error
+}
 
-	return i.heap.Len()
+// NewSortEntryIterator returns a new EntryIterator that sorts entries by timestamp (depending on the direction) the input iterators.
+// The iterator only order entries across given `is` iterators, it does not sort entries within individual iterator.
+// This means using this iterator with a single iterator will result in the same result as the input iterator.
+// When timestamp is equal, the iterator sorts samples by their label alphabetically.
+func NewSortEntryIterator(is []EntryIterator, direction logproto.Direction) EntryIterator {
+	if len(is) == 0 {
+		return NoopIterator
+	}
+	if len(is) == 1 {
+		return is[0]
+	}
+	maxVal, less := treeLess(direction)
+	result := &entrySortIterator{}
+	result.tree = loser.New(is, maxVal, sortFieldsAt, less, result.closeEntry)
+	return result
+}
+
+func treeLess(direction logproto.Direction) (maxVal sortFields, less func(a, b sortFields) bool) {
+	switch direction {
+	case logproto.BACKWARD:
+		maxVal = sortFields{timeNanos: math.MinInt64}
+		less = lessDescending
+	case logproto.FORWARD:
+		maxVal = sortFields{timeNanos: math.MaxInt64}
+		less = lessAscending
+	default:
+		panic("bad direction")
+	}
+	return
+}
+
+type sortFields struct {
+	labels     string
+	timeNanos  int64
+	streamHash uint64
+}
+
+func sortFieldsAt(i EntryIterator) sortFields {
+	return sortFields{
+		timeNanos:  i.Entry().Timestamp.UnixNano(),
+		labels:     i.Labels(),
+		streamHash: i.StreamHash(),
+	}
+}
+
+func lessAscending(e1, e2 sortFields) bool {
+	if e1.timeNanos == e2.timeNanos {
+		// The underlying stream hash may not be available, such as when merging LokiResponses in the
+		// frontend which were sharded. Prefer to use the underlying stream hash when available,
+		// which is needed in deduping code, but defer to label sorting when it's not present.
+		if e1.streamHash == 0 {
+			return e1.labels < e2.labels
+		}
+		return e1.streamHash < e2.streamHash
+	}
+	return e1.timeNanos < e2.timeNanos
+}
+
+func lessDescending(e1, e2 sortFields) bool {
+	if e1.timeNanos == e2.timeNanos {
+		if e1.streamHash == 0 {
+			return e1.labels < e2.labels
+		}
+		return e1.streamHash < e2.streamHash
+	}
+	return e1.timeNanos > e2.timeNanos
+}
+
+func (i *entrySortIterator) closeEntry(e EntryIterator) {
+	if err := e.Error(); err != nil {
+		i.errs = append(i.errs, err)
+	}
+	util.LogError("closing iterator", e.Close)
+
+}
+func (i *entrySortIterator) Next() bool {
+	ret := i.tree.Next()
+	if !ret {
+		return false
+	}
+	next := i.tree.Winner()
+	i.currEntry.Entry = next.Entry()
+	i.currEntry.labels = next.Labels()
+	i.currEntry.streamHash = next.StreamHash()
+	return true
+}
+
+func (i *entrySortIterator) Entry() logproto.Entry {
+	return i.currEntry.Entry
+}
+
+func (i *entrySortIterator) Labels() string {
+	return i.currEntry.labels
+}
+
+func (i *entrySortIterator) StreamHash() uint64 {
+	return i.currEntry.streamHash
+}
+
+func (i *entrySortIterator) Error() error {
+	switch len(i.errs) {
+	case 0:
+		return nil
+	case 1:
+		return i.errs[0]
+	default:
+		return util.MultiError(i.errs)
+	}
+}
+
+func (i *entrySortIterator) Close() error {
+	i.tree.Close()
+	return i.Error()
 }
 
 // NewStreamsIterator returns an iterator over logproto.Stream
-func NewStreamsIterator(ctx context.Context, streams []logproto.Stream, direction logproto.Direction) EntryIterator {
+func NewStreamsIterator(streams []logproto.Stream, direction logproto.Direction) EntryIterator {
 	is := make([]EntryIterator, 0, len(streams))
 	for i := range streams {
 		is = append(is, NewStreamIterator(streams[i]))
 	}
-	return NewHeapIterator(ctx, is, direction)
+	return NewSortEntryIterator(is, direction)
 }
 
 // NewQueryResponseIterator returns an iterator over a QueryResponse.
-func NewQueryResponseIterator(ctx context.Context, resp *logproto.QueryResponse, direction logproto.Direction) EntryIterator {
-	is := make([]EntryIterator, 0, len(resp.Streams))
-	for i := range resp.Streams {
-		is = append(is, NewStreamIterator(resp.Streams[i]))
-	}
-	return NewHeapIterator(ctx, is, direction)
+func NewQueryResponseIterator(resp *logproto.QueryResponse, direction logproto.Direction) EntryIterator {
+	return NewStreamsIterator(resp.Streams, direction)
 }
 
 type queryClientIterator struct {
@@ -345,6 +381,7 @@ func NewQueryClientIterator(client logproto.Querier_QueryClient, direction logpr
 }
 
 func (i *queryClientIterator) Next() bool {
+	ctx := i.client.Context()
 	for i.curr == nil || !i.curr.Next() {
 		batch, err := i.client.Recv()
 		if err == io.EOF {
@@ -353,8 +390,8 @@ func (i *queryClientIterator) Next() bool {
 			i.err = err
 			return false
 		}
-
-		i.curr = NewQueryResponseIterator(i.client.Context(), batch, i.direction)
+		stats.JoinIngesters(ctx, batch.Stats)
+		i.curr = NewQueryResponseIterator(batch, i.direction)
 	}
 
 	return true
@@ -368,6 +405,8 @@ func (i *queryClientIterator) Labels() string {
 	return i.curr.Labels()
 }
 
+func (i *queryClientIterator) StreamHash() uint64 { return i.curr.StreamHash() }
+
 func (i *queryClientIterator) Error() error {
 	return i.err
 }
@@ -377,16 +416,13 @@ func (i *queryClientIterator) Close() error {
 }
 
 type nonOverlappingIterator struct {
-	labels    string
-	i         int
 	iterators []EntryIterator
 	curr      EntryIterator
 }
 
 // NewNonOverlappingIterator gives a chained iterator over a list of iterators.
-func NewNonOverlappingIterator(iterators []EntryIterator, labels string) EntryIterator {
+func NewNonOverlappingIterator(iterators []EntryIterator) EntryIterator {
 	return &nonOverlappingIterator{
-		labels:    labels,
 		iterators: iterators,
 	}
 }
@@ -402,7 +438,6 @@ func (i *nonOverlappingIterator) Next() bool {
 		if i.curr != nil {
 			i.curr.Close()
 		}
-		i.i++
 		i.curr, i.iterators = i.iterators[0], i.iterators[1:]
 	}
 
@@ -414,18 +449,24 @@ func (i *nonOverlappingIterator) Entry() logproto.Entry {
 }
 
 func (i *nonOverlappingIterator) Labels() string {
-	if i.labels != "" {
-		return i.labels
+	if i.curr == nil {
+		return ""
 	}
-
 	return i.curr.Labels()
 }
 
-func (i *nonOverlappingIterator) Error() error {
-	if i.curr != nil {
-		return i.curr.Error()
+func (i *nonOverlappingIterator) StreamHash() uint64 {
+	if i.curr == nil {
+		return 0
 	}
-	return nil
+	return i.curr.StreamHash()
+}
+
+func (i *nonOverlappingIterator) Error() error {
+	if i.curr == nil {
+		return nil
+	}
+	return i.curr.Error()
 }
 
 func (i *nonOverlappingIterator) Close() error {
@@ -483,8 +524,9 @@ func (i *timeRangedIterator) Next() bool {
 }
 
 type entryWithLabels struct {
-	entry  logproto.Entry
-	labels string
+	logproto.Entry
+	labels     string
+	streamHash uint64
 }
 
 type reverseIterator struct {
@@ -520,7 +562,7 @@ func (i *reverseIterator) load() {
 	if !i.loaded {
 		i.loaded = true
 		for count := uint32(0); (i.limit == 0 || count < i.limit) && i.iter.Next(); count++ {
-			i.entriesWithLabels = append(i.entriesWithLabels, entryWithLabels{i.iter.Entry(), i.iter.Labels()})
+			i.entriesWithLabels = append(i.entriesWithLabels, entryWithLabels{i.iter.Entry(), i.iter.Labels(), i.iter.StreamHash()})
 		}
 		i.iter.Close()
 	}
@@ -537,11 +579,15 @@ func (i *reverseIterator) Next() bool {
 }
 
 func (i *reverseIterator) Entry() logproto.Entry {
-	return i.cur.entry
+	return i.cur.Entry
 }
 
 func (i *reverseIterator) Labels() string {
 	return i.cur.labels
+}
+
+func (i *reverseIterator) StreamHash() uint64 {
+	return i.cur.streamHash
 }
 
 func (i *reverseIterator) Error() error { return nil }
@@ -591,7 +637,7 @@ func (i *reverseEntryIterator) load() {
 	if !i.loaded {
 		i.loaded = true
 		for i.iter.Next() {
-			i.buf.entries = append(i.buf.entries, entryWithLabels{i.iter.Entry(), i.iter.Labels()})
+			i.buf.entries = append(i.buf.entries, entryWithLabels{i.iter.Entry(), i.iter.Labels(), i.iter.StreamHash()})
 		}
 		i.iter.Close()
 	}
@@ -599,9 +645,8 @@ func (i *reverseEntryIterator) load() {
 
 func (i *reverseEntryIterator) Next() bool {
 	i.load()
-	if len(i.buf.entries) == 0 {
-		entryBufferPool.Put(i.buf)
-		i.buf.entries = nil
+	if i.buf == nil || len(i.buf.entries) == 0 {
+		i.release()
 		return false
 	}
 	i.cur, i.buf.entries = i.buf.entries[len(i.buf.entries)-1], i.buf.entries[:len(i.buf.entries)-1]
@@ -609,21 +654,34 @@ func (i *reverseEntryIterator) Next() bool {
 }
 
 func (i *reverseEntryIterator) Entry() logproto.Entry {
-	return i.cur.entry
+	return i.cur.Entry
 }
 
 func (i *reverseEntryIterator) Labels() string {
 	return i.cur.labels
 }
 
+func (i *reverseEntryIterator) StreamHash() uint64 {
+	return i.cur.streamHash
+}
+
 func (i *reverseEntryIterator) Error() error { return nil }
 
-func (i *reverseEntryIterator) Close() error {
-	if i.buf.entries != nil {
-		i.buf.entries = i.buf.entries[:0]
-		entryBufferPool.Put(i.buf)
-		i.buf.entries = nil
+func (i *reverseEntryIterator) release() {
+	if i.buf == nil {
+		return
 	}
+
+	if i.buf.entries != nil {
+		// preserve the underlying slice before releasing to pool
+		i.buf.entries = i.buf.entries[:0]
+	}
+	entryBufferPool.Put(i.buf)
+	i.buf = nil
+}
+
+func (i *reverseEntryIterator) Close() error {
+	i.release()
 	if !i.loaded {
 		return i.iter.Close()
 	}
@@ -632,25 +690,37 @@ func (i *reverseEntryIterator) Close() error {
 
 // ReadBatch reads a set of entries off an iterator.
 func ReadBatch(i EntryIterator, size uint32) (*logproto.QueryResponse, uint32, error) {
-	streams := map[string]*logproto.Stream{}
-	respSize := uint32(0)
+	var (
+		streams      = map[uint64]map[string]*logproto.Stream{}
+		respSize     uint32
+		streamsCount int
+	)
 	for ; respSize < size && i.Next(); respSize++ {
-		labels, entry := i.Labels(), i.Entry()
-		stream, ok := streams[labels]
+		labels, hash, entry := i.Labels(), i.StreamHash(), i.Entry()
+		mutatedStreams, ok := streams[hash]
 		if !ok {
-			stream = &logproto.Stream{
-				Labels: labels,
-			}
-			streams[labels] = stream
+			mutatedStreams = map[string]*logproto.Stream{}
+			streams[hash] = mutatedStreams
 		}
-		stream.Entries = append(stream.Entries, entry)
+		mutatedStream, ok := mutatedStreams[labels]
+		if !ok {
+			streamsCount++
+			mutatedStream = &logproto.Stream{
+				Labels: labels,
+				Hash:   hash,
+			}
+			mutatedStreams[labels] = mutatedStream
+		}
+		mutatedStream.Entries = append(mutatedStream.Entries, entry)
 	}
 
 	result := logproto.QueryResponse{
-		Streams: make([]logproto.Stream, 0, len(streams)),
+		Streams: make([]logproto.Stream, 0, streamsCount),
 	}
-	for _, stream := range streams {
-		result.Streams = append(result.Streams, *stream)
+	for _, mutatedStreams := range streams {
+		for _, s := range mutatedStreams {
+			result.Streams = append(result.Streams, *s)
+		}
 	}
 	return &result, respSize, i.Error()
 }
@@ -676,10 +746,11 @@ func NewPeekingIterator(iter EntryIterator) PeekingEntryIterator {
 	next := &entryWithLabels{}
 	if iter.Next() {
 		cache = &entryWithLabels{
-			entry:  iter.Entry(),
-			labels: iter.Labels(),
+			Entry:      iter.Entry(),
+			labels:     iter.Labels(),
+			streamHash: iter.StreamHash(),
 		}
-		next.entry = cache.entry
+		next.Entry = cache.Entry
 		next.labels = cache.labels
 	}
 	return &peekingEntryIterator{
@@ -692,8 +763,9 @@ func NewPeekingIterator(iter EntryIterator) PeekingEntryIterator {
 // Next implements `EntryIterator`
 func (it *peekingEntryIterator) Next() bool {
 	if it.cache != nil {
-		it.next.entry = it.cache.entry
+		it.next.Entry = it.cache.Entry
 		it.next.labels = it.cache.labels
+		it.next.streamHash = it.cache.streamHash
 		it.cacheNext()
 		return true
 	}
@@ -703,8 +775,9 @@ func (it *peekingEntryIterator) Next() bool {
 // cacheNext caches the next element if it exists.
 func (it *peekingEntryIterator) cacheNext() {
 	if it.iter.Next() {
-		it.cache.entry = it.iter.Entry()
+		it.cache.Entry = it.iter.Entry()
 		it.cache.labels = it.iter.Labels()
+		it.cache.streamHash = it.iter.StreamHash()
 		return
 	}
 	// nothing left removes the cached entry
@@ -714,7 +787,7 @@ func (it *peekingEntryIterator) cacheNext() {
 // Peek implements `PeekingEntryIterator`
 func (it *peekingEntryIterator) Peek() (string, logproto.Entry, bool) {
 	if it.cache != nil {
-		return it.cache.labels, it.cache.entry, true
+		return it.cache.labels, it.cache.Entry, true
 	}
 	return "", logproto.Entry{}, false
 }
@@ -727,10 +800,17 @@ func (it *peekingEntryIterator) Labels() string {
 	return ""
 }
 
+func (it *peekingEntryIterator) StreamHash() uint64 {
+	if it.next != nil {
+		return it.next.streamHash
+	}
+	return 0
+}
+
 // Entry implements `EntryIterator`
 func (it *peekingEntryIterator) Entry() logproto.Entry {
 	if it.next != nil {
-		return it.next.entry
+		return it.next.Entry
 	}
 	return logproto.Entry{}
 }

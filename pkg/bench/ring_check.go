@@ -55,7 +55,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 		workload: workload,
 	}
 	reg := prometheus.DefaultRegisterer
-	cfg.MemberlistKV.MetricsRegisterer = reg
+	//cfg.MemberlistKV.MetricsRegisterer = reg
 	cfg.MemberlistKV.Codecs = []codec.Codec{
 		ring.GetCodec(),
 	}
@@ -72,7 +72,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 	cfg.RingConfig.KVStore.MemberlistKV = r.MemberlistKV.GetMemberlistKV
 
 	var err error
-	r.Ring, err = ring.New(cfg.RingConfig, "ingester", ring.IngesterRingKey, logger, reg)
+	r.Ring, err = ring.New(cfg.RingConfig, "ingester", "ring", logger, reg)
 	if err != nil {
 		return nil, err
 	}

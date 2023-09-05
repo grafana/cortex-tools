@@ -20,7 +20,7 @@ import (
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/pkg/timestamp"
+	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
@@ -53,9 +53,9 @@ var (
 // Config is a specific agent that runs within the overall Prometheus
 // agent. It has its own set of scrape_configs and remote_write rules.
 type Config struct {
-	Tenant      string
-	Name        string
-	RemoteWrite []*config.RemoteWriteConfig
+	Tenant      string                      `doc:"hidden"`
+	Name        string                      `doc:"hidden"`
+	RemoteWrite []*config.RemoteWriteConfig `doc:"hidden"`
 
 	Dir string `yaml:"dir"`
 
@@ -66,7 +66,7 @@ type Config struct {
 	MinAge time.Duration `yaml:"min_age,omitempty"`
 	MaxAge time.Duration `yaml:"max_age,omitempty"`
 
-	RemoteFlushDeadline time.Duration `yaml:"remote_flush_deadline,omitempty"`
+	RemoteFlushDeadline time.Duration `yaml:"remote_flush_deadline,omitempty" doc:"hidden"`
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler.
@@ -143,8 +143,8 @@ func (c *Config) Clone() (Config, error) {
 }
 
 func (c *Config) RegisterFlags(f *flag.FlagSet) {
-	f.StringVar(&c.Dir, "ruler.wal.dir", DefaultConfig.Dir, "Directory to store the WAL and/or recover from WAL.")
-	f.DurationVar(&c.TruncateFrequency, "ruler.wal.truncate-frequency", DefaultConfig.TruncateFrequency, "How often to run the WAL truncation.")
+	f.StringVar(&c.Dir, "ruler.wal.dir", DefaultConfig.Dir, "The directory in which to write tenant WAL files. Each tenant will have its own directory one level below this directory.")
+	f.DurationVar(&c.TruncateFrequency, "ruler.wal.truncate-frequency", DefaultConfig.TruncateFrequency, "Frequency with which to run the WAL truncation process.")
 	f.DurationVar(&c.MinAge, "ruler.wal.min-age", DefaultConfig.MinAge, "Minimum age that samples must exist in the WAL before being truncated.")
 	f.DurationVar(&c.MaxAge, "ruler.wal.max-age", DefaultConfig.MaxAge, "Maximum age that samples must exist in the WAL before being truncated.")
 }
@@ -207,6 +207,9 @@ func newInstance(cfg Config, reg prometheus.Registerer, logger log.Logger, newWa
 }
 
 func (i *Instance) Storage() storage.Storage {
+	i.mut.Lock()
+	defer i.mut.Unlock()
+
 	return i.storage
 }
 
@@ -276,7 +279,7 @@ func (i *Instance) Run(ctx context.Context) error {
 type noopScrapeManager struct{}
 
 func (n noopScrapeManager) Get() (*scrape.Manager, error) {
-	return nil, nil
+	return nil, errors.New("No-op Scrape manager not ready")
 }
 
 // initialize sets up the various Prometheus components with their initial
@@ -284,11 +287,11 @@ func (n noopScrapeManager) Get() (*scrape.Manager, error) {
 // components cannot be reused after they are stopped so we need to recreate them
 // each run.
 func (i *Instance) initialize(_ context.Context, reg prometheus.Registerer, cfg *Config) error {
-	// explicitly set this in case this function is called multiple times
-	i.initialized = false
-
 	i.mut.Lock()
 	defer i.mut.Unlock()
+
+	// explicitly set this in case this function is called multiple times
+	i.initialized = false
 
 	var err error
 
@@ -373,6 +376,9 @@ func (i *Instance) Update(c Config) (err error) {
 
 // Ready indicates if the instance is ready for processing.
 func (i *Instance) Ready() bool {
+	i.mut.Lock()
+	defer i.mut.Unlock()
+
 	return i.initialized
 }
 

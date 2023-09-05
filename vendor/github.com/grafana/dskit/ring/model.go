@@ -1,10 +1,13 @@
 package ring
 
 import (
-	"container/heap"
 	"fmt"
+	"math"
 	"sort"
+	"sync"
 	"time"
+
+	"github.com/grafana/dskit/loser"
 
 	"github.com/gogo/protobuf/proto"
 
@@ -173,6 +176,14 @@ func (i *InstanceDesc) IsReady(now time.Time, heartbeatTimeout time.Duration) er
 // (see resolveConflicts).
 //
 // This method is part of memberlist.Mergeable interface, and is only used by gossiping ring.
+//
+// The receiver must be normalised, that is, the token lists must sorted and not contain
+// duplicates. The function guarantees that the receiver will be left in this normalised state,
+// so multiple subsequent Merge calls are valid usage.
+//
+// The Mergeable passed as the parameter does not need to be normalised.
+//
+// Note: This method modifies d and mergeable to reduce allocations and copies.
 func (d *Desc) Merge(mergeable memberlist.Mergeable, localCAS bool) (memberlist.Mergeable, error) {
 	return d.mergeWithTime(mergeable, localCAS, time.Now())
 }
@@ -192,15 +203,21 @@ func (d *Desc) mergeWithTime(mergeable memberlist.Mergeable, localCAS bool, now 
 		return nil, nil
 	}
 
-	thisIngesterMap := buildNormalizedIngestersMap(d)
-	otherIngesterMap := buildNormalizedIngestersMap(other)
+	normalizeIngestersMap(other)
+
+	thisIngesterMap := d.Ingesters
+	otherIngesterMap := other.Ingesters
 
 	var updated []string
+	tokensChanged := false
 
 	for name, oing := range otherIngesterMap {
 		ting := thisIngesterMap[name]
 		// ting.Timestamp will be 0, if there was no such ingester in our version
 		if oing.Timestamp > ting.Timestamp {
+			if !tokensEqual(ting.Tokens, oing.Tokens) {
+				tokensChanged = true
+			}
 			oing.Tokens = append([]uint32(nil), oing.Tokens...) // make a copy of tokens
 			thisIngesterMap[name] = oing
 			updated = append(updated, name)
@@ -235,7 +252,7 @@ func (d *Desc) mergeWithTime(mergeable memberlist.Mergeable, localCAS bool, now 
 	}
 
 	// resolveConflicts allocates lot of memory, so if we can avoid it, do that.
-	if conflictingTokensExist(thisIngesterMap) {
+	if tokensChanged && conflictingTokensExist(thisIngesterMap) {
 		resolveConflicts(thisIngesterMap)
 	}
 
@@ -261,22 +278,18 @@ func (d *Desc) MergeContent() []string {
 	return result
 }
 
-// buildNormalizedIngestersMap will do the following:
+// normalizeIngestersMap will do the following:
 // - sorts tokens and removes duplicates (only within single ingester)
-// - it doesn't modify input ring
-func buildNormalizedIngestersMap(inputRing *Desc) map[string]InstanceDesc {
-	out := map[string]InstanceDesc{}
-
+// - modifies the input ring
+func normalizeIngestersMap(inputRing *Desc) {
 	// Make sure LEFT ingesters have no tokens
 	for n, ing := range inputRing.Ingesters {
 		if ing.State == LEFT {
 			ing.Tokens = nil
+			inputRing.Ingesters[n] = ing
 		}
-		out[n] = ing
-	}
 
-	// Sort tokens, and remove duplicates
-	for name, ing := range out {
+		// Sort tokens, and remove duplicates
 		if len(ing.Tokens) == 0 {
 			continue
 		}
@@ -297,25 +310,39 @@ func buildNormalizedIngestersMap(inputRing *Desc) map[string]InstanceDesc {
 		}
 
 		// write updated value back to map
-		out[name] = ing
+		inputRing.Ingesters[n] = ing
 	}
-
-	return out
 }
 
-func conflictingTokensExist(normalizedIngesters map[string]InstanceDesc) bool {
-	count := 0
-	for _, ing := range normalizedIngesters {
-		count += len(ing.Tokens)
+// tokensEqual checks for equality of two slices. Assumes the slices are sorted.
+func tokensEqual(lhs, rhs []uint32) bool {
+	if len(lhs) != len(rhs) {
+		return false
 	}
+	for i := 0; i < len(lhs); i++ {
+		if lhs[i] != rhs[i] {
+			return false
+		}
+	}
+	return true
+}
 
-	tokensMap := make(map[uint32]bool, count)
+var tokenMapPool = sync.Pool{New: func() interface{} { return make(map[uint32]struct{}) }}
+
+func conflictingTokensExist(normalizedIngesters map[string]InstanceDesc) bool {
+	tokensMap := tokenMapPool.Get().(map[uint32]struct{})
+	defer func() {
+		for k := range tokensMap {
+			delete(tokensMap, k)
+		}
+		tokenMapPool.Put(tokensMap)
+	}()
 	for _, ing := range normalizedIngesters {
 		for _, t := range ing.Tokens {
-			if tokensMap[t] {
+			if _, contains := tokensMap[t]; contains {
 				return true
 			}
-			tokensMap[t] = true
+			tokensMap[t] = struct{}{}
 		}
 	}
 	return false
@@ -451,7 +478,7 @@ func (d *Desc) GetTokens() []uint32 {
 func (d *Desc) getTokensByZone() map[string][]uint32 {
 	zones := map[string][][]uint32{}
 	for _, instance := range d.Ingesters {
-		// Tokens may not be sorted for an older version which, so we enforce sorting here.
+		// Tokens may not be sorted for an older version, so we enforce sorting here.
 		tokens := instance.Tokens
 		if !sort.IsSorted(Tokens(tokens)) {
 			sort.Sort(Tokens(tokens))
@@ -462,6 +489,27 @@ func (d *Desc) getTokensByZone() map[string][]uint32 {
 
 	// Merge tokens per zone.
 	return MergeTokensByZone(zones)
+}
+
+// getOldestRegisteredTimestamp returns unix timestamp of oldest "RegisteredTimestamp" value from all instances.
+// If any instance has 0 value of RegisteredTimestamp, this function returns 0.
+func (d *Desc) getOldestRegisteredTimestamp() int64 {
+	var result int64
+
+	for _, instance := range d.Ingesters {
+		switch {
+		case instance.RegisteredTimestamp == 0:
+			return 0
+
+		case result == 0:
+			result = instance.RegisteredTimestamp
+
+		case instance.RegisteredTimestamp < result:
+			result = instance.RegisteredTimestamp
+		}
+	}
+
+	return result
 }
 
 type CompareResult int
@@ -544,68 +592,21 @@ func GetOrCreateRingDesc(d interface{}) *Desc {
 	return d.(*Desc)
 }
 
-// TokensHeap is an heap data structure used to merge multiple lists
-// of sorted tokens into a single one.
-type TokensHeap [][]uint32
-
-func (h TokensHeap) Len() int {
-	return len(h)
-}
-
-func (h TokensHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h TokensHeap) Less(i, j int) bool {
-	return h[i][0] < h[j][0]
-}
-
-func (h *TokensHeap) Push(x interface{}) {
-	*h = append(*h, x.([]uint32))
-}
-
-func (h *TokensHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
-}
-
 // MergeTokens takes in input multiple lists of tokens and returns a single list
 // containing all tokens merged and sorted. Each input single list is required
 // to have tokens already sorted.
 func MergeTokens(instances [][]uint32) []uint32 {
 	numTokens := 0
 
-	// Build the heap.
-	h := make(TokensHeap, 0, len(instances))
 	for _, tokens := range instances {
-		if len(tokens) == 0 {
-			continue
-		}
-
-		// We can safely append the input slice because elements inside are never shuffled.
-		h = append(h, tokens)
 		numTokens += len(tokens)
 	}
-	heap.Init(&h)
 
+	tree := loser.New(instances, math.MaxUint32)
 	out := make([]uint32, 0, numTokens)
 
-	for h.Len() > 0 {
-		// The minimum element in the tree is the root, at index 0.
-		lowest := h[0]
-		out = append(out, lowest[0])
-
-		if len(lowest) > 1 {
-			// Remove the first token from the lowest because we popped it
-			// and then fix the heap to keep it sorted.
-			h[0] = h[0][1:]
-			heap.Fix(&h, 0)
-		} else {
-			heap.Remove(&h, 0)
-		}
+	for tree.Next() {
+		out = append(out, tree.Winner())
 	}
 
 	return out

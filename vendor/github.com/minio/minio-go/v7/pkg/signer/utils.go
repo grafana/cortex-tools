@@ -19,10 +19,9 @@ package signer
 
 import (
 	"crypto/hmac"
+	"crypto/sha256"
 	"net/http"
 	"strings"
-
-	"github.com/minio/sha256-simd"
 )
 
 // unsignedPayload - value to be set to X-Amz-Content-Sha256 header when
@@ -36,7 +35,7 @@ func sum256(data []byte) []byte {
 }
 
 // sumHMAC calculate hmac between two input byte array.
-func sumHMAC(key []byte, data []byte) []byte {
+func sumHMAC(key, data []byte) []byte {
 	hash := hmac.New(sha256.New, key)
 	hash.Write(data)
 	return hash.Sum(nil)
@@ -44,6 +43,10 @@ func sumHMAC(key []byte, data []byte) []byte {
 
 // getHostAddr returns host header if available, otherwise returns host from URL
 func getHostAddr(req *http.Request) string {
+	host := req.Header.Get("host")
+	if host != "" && req.Host != host {
+		return host
+	}
 	if req.Host != "" {
 		return req.Host
 	}

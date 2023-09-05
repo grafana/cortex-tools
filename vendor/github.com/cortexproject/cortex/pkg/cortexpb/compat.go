@@ -12,16 +12,16 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/exemplar"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/textparse"
+	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/textparse"
 
 	"github.com/cortexproject/cortex/pkg/util"
 )
 
 // ToWriteRequest converts matched slices of Labels, Samples and Metadata into a WriteRequest proto.
 // It gets timeseries from the pool, so ReuseSlice() should be called when done.
-func ToWriteRequest(lbls []labels.Labels, samples []Sample, metadata []*MetricMetadata, source WriteRequest_SourceEnum) *WriteRequest {
+func ToWriteRequest(lbls []labels.Labels, samples []Sample, metadata []*MetricMetadata, histograms []Histogram, source WriteRequest_SourceEnum) *WriteRequest {
 	req := &WriteRequest{
 		Timeseries: PreallocTimeseriesSliceFromPool(),
 		Metadata:   metadata,
@@ -32,6 +32,9 @@ func ToWriteRequest(lbls []labels.Labels, samples []Sample, metadata []*MetricMe
 		ts := TimeseriesFromPool()
 		ts.Labels = append(ts.Labels, FromLabelsToLabelAdapters(lbls[i])...)
 		ts.Samples = append(ts.Samples, s)
+		if i < len(histograms) {
+			ts.Histograms = append(ts.Histograms, histograms[i])
+		}
 		req.Timeseries = append(req.Timeseries, PreallocTimeseries{TimeSeries: ts})
 	}
 
@@ -100,6 +103,12 @@ func FromLabelsToLabelAdapters(ls labels.Labels) []LabelAdapter {
 // Don't do this on any performance sensitive paths.
 func FromLabelAdaptersToMetric(ls []LabelAdapter) model.Metric {
 	return util.LabelsToMetric(FromLabelAdaptersToLabels(ls))
+}
+
+// FromLabelAdaptersToMetric converts []LabelAdapter to a model.Metric with copy.
+// Don't do this on any performance sensitive paths.
+func FromLabelAdaptersToMetricWithCopy(ls []LabelAdapter) model.Metric {
+	return util.LabelsToMetric(FromLabelAdaptersToLabelsWithCopy(ls))
 }
 
 // FromMetricsToLabelAdapters converts model.Metric to []LabelAdapter.

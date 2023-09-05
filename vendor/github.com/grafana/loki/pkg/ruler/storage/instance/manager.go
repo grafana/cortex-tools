@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
-	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/prometheus/storage"
+
+	util_log "github.com/grafana/loki/pkg/util/log"
 )
 
 var (
@@ -100,8 +101,10 @@ type managedProcess struct {
 }
 
 func (p managedProcess) Stop() {
-	if err := p.inst.Stop(); err != nil {
-		level.Error(util_log.Logger).Log("msg", "error while stopping instance", "user", p.inst.Tenant(), "err", err)
+	if p.inst.Ready() { // Only stop initialized instances to avoid panic
+		if err := p.inst.Stop(); err != nil {
+			level.Error(util_log.Logger).Log("msg", "error while stopping instance", "user", p.inst.Tenant(), "err", err)
+		}
 	}
 
 	p.cancel()
@@ -360,7 +363,7 @@ func (m MockManager) Ready() bool {
 	return true
 }
 
-func (m MockManager) InstanceReady(name string) bool {
+func (m MockManager) InstanceReady(_ string) bool {
 	return true
 }
 
