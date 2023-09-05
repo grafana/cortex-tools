@@ -109,9 +109,6 @@ func (o *OverridesExporterCommand) updatePresets(presetsMap map[string]*validati
 			"max_series_per_query", preset,
 		).Set(float64(limits.MaxSeriesPerQuery))
 		o.presetsGauge.WithLabelValues(
-			"max_samples_per_query", preset,
-		).Set(float64(limits.MaxSamplesPerQuery))
-		o.presetsGauge.WithLabelValues(
 			"max_local_series_per_user", preset,
 		).Set(float64(limits.MaxLocalSeriesPerUser))
 		o.presetsGauge.WithLabelValues(

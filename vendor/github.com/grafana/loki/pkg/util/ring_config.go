@@ -11,9 +11,10 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/flagext"
 	"github.com/grafana/dskit/kv"
-
-	util_log "github.com/cortexproject/cortex/pkg/util/log"
+	"github.com/grafana/dskit/netutil"
 	"github.com/grafana/dskit/ring"
+
+	util_log "github.com/grafana/loki/pkg/util/log"
 )
 
 // RingConfig masks the ring lifecycler config which contains
@@ -28,11 +29,12 @@ type RingConfig struct {
 	ZoneAwarenessEnabled bool          `yaml:"zone_awareness_enabled"`
 
 	// Instance details
-	InstanceID             string   `yaml:"instance_id"`
-	InstanceInterfaceNames []string `yaml:"instance_interface_names"`
+	InstanceID             string   `yaml:"instance_id" doc:"default=<hostname>"`
+	InstanceInterfaceNames []string `yaml:"instance_interface_names" doc:"default=[<private network interfaces>]"`
 	InstancePort           int      `yaml:"instance_port"`
 	InstanceAddr           string   `yaml:"instance_addr"`
 	InstanceZone           string   `yaml:"instance_availability_zone"`
+	EnableIPv6             bool     `yaml:"instance_enable_ipv6"`
 
 	// Injected internally
 	ListenPort int `yaml:"-"`
@@ -57,19 +59,22 @@ func (cfg *RingConfig) RegisterFlagsWithPrefix(flagsPrefix, storePrefix string, 
 	f.BoolVar(&cfg.ZoneAwarenessEnabled, flagsPrefix+"ring.zone-awareness-enabled", false, "True to enable zone-awareness and replicate blocks across different availability zones.")
 
 	// Instance flags
-	cfg.InstanceInterfaceNames = []string{"eth0", "en0"}
+	cfg.InstanceInterfaceNames = netutil.PrivateNetworkInterfacesWithFallback([]string{"eth0", "en0"}, util_log.Logger)
 	f.Var((*flagext.StringSlice)(&cfg.InstanceInterfaceNames), flagsPrefix+"ring.instance-interface-names", "Name of network interface to read address from.")
 	f.StringVar(&cfg.InstanceAddr, flagsPrefix+"ring.instance-addr", "", "IP address to advertise in the ring.")
 	f.IntVar(&cfg.InstancePort, flagsPrefix+"ring.instance-port", 0, "Port to advertise in the ring (defaults to server.grpc-listen-port).")
 	f.StringVar(&cfg.InstanceID, flagsPrefix+"ring.instance-id", hostname, "Instance ID to register in the ring.")
 	f.StringVar(&cfg.InstanceZone, flagsPrefix+"ring.instance-availability-zone", "", "The availability zone where this instance is running. Required if zone-awareness is enabled.")
+	f.BoolVar(&cfg.EnableIPv6, flagsPrefix+"ring.instance-enable-ipv6", false, "Enable using a IPv6 instance address.")
 }
 
 // ToLifecyclerConfig returns a LifecyclerConfig based on the compactor ring config.
 func (cfg *RingConfig) ToLifecyclerConfig(numTokens int, logger log.Logger) (ring.BasicLifecyclerConfig, error) {
-	instanceAddr, err := ring.GetInstanceAddr(cfg.InstanceAddr, cfg.InstanceInterfaceNames, logger)
+	instanceAddr, err := ring.GetInstanceAddr(cfg.InstanceAddr, cfg.InstanceInterfaceNames, logger, cfg.EnableIPv6)
 	if err != nil {
-		return ring.BasicLifecyclerConfig{}, err
+		return ring.BasicLifecyclerConfig{
+			RingTokenGenerator: ring.NewRandomTokenGenerator(),
+		}, err
 	}
 
 	instancePort := ring.GetInstancePort(cfg.InstancePort, cfg.ListenPort)
@@ -81,6 +86,7 @@ func (cfg *RingConfig) ToLifecyclerConfig(numTokens int, logger log.Logger) (rin
 		HeartbeatPeriod:     cfg.HeartbeatPeriod,
 		TokensObservePeriod: 0,
 		NumTokens:           numTokens,
+		RingTokenGenerator:  ring.NewRandomTokenGenerator(),
 	}, nil
 }
 

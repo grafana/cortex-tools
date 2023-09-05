@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
-	"github.com/prometheus/prometheus/pkg/rulefmt"
+	"github.com/prometheus/prometheus/model/rulefmt"
 	yaml "gopkg.in/yaml.v3"
 )
 

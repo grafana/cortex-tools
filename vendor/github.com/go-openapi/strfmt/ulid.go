@@ -15,9 +15,12 @@ import (
 
 // ULID represents a ulid string format
 // ref:
-//   https://github.com/ulid/spec
+//
+//	https://github.com/ulid/spec
+//
 // impl:
-//   https://github.com/oklog/ulid
+//
+//	https://github.com/oklog/ulid
 //
 // swagger:strfmt ulid
 type ULID struct {
@@ -32,7 +35,7 @@ var (
 	}
 
 	ULIDScanDefaultFunc = func(raw interface{}) (ULID, error) {
-		var u ULID = NewULIDZero()
+		u := NewULIDZero()
 		switch x := raw.(type) {
 		case nil:
 			// zerp ulid
@@ -89,8 +92,14 @@ func NewULIDZero() ULID {
 }
 
 // NewULID generates new unique ULID value and a error if any
-func NewULID() (u ULID, err error) {
-	entropy := ulidEntropyPool.Get().(io.Reader)
+func NewULID() (ULID, error) {
+	var u ULID
+
+	obj := ulidEntropyPool.Get()
+	entropy, ok := obj.(io.Reader)
+	if !ok {
+		return u, fmt.Errorf("failed to cast %+v to io.Reader", obj)
+	}
 
 	id, err := ulid.New(ulid.Now(), entropy)
 	if err != nil {

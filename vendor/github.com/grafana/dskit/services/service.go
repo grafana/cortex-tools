@@ -41,18 +41,17 @@ func (s State) String() string {
 //
 // State diagram for the service:
 //
-//       ┌────────────────────────────────────────────────────────────────────┐
-//       │                                                                    │
-//       │                                                                    ▼
-//    ┌─────┐      ┌──────────┐      ┌─────────┐     ┌──────────┐      ┌────────────┐
-//    │ New │─────▶│ Starting │─────▶│ Running │────▶│ Stopping │───┬─▶│ Terminated │
-//    └─────┘      └──────────┘      └─────────┘     └──────────┘   │  └────────────┘
-//                       │                                          │
-//                       │                                          │
-//                       │                                          │   ┌────────┐
-//                       └──────────────────────────────────────────┴──▶│ Failed │
-//                                                                      └────────┘
-//
+//	   ┌────────────────────────────────────────────────────────────────────┐
+//	   │                                                                    │
+//	   │                                                                    ▼
+//	┌─────┐      ┌──────────┐      ┌─────────┐     ┌──────────┐      ┌────────────┐
+//	│ New │─────▶│ Starting │─────▶│ Running │────▶│ Stopping │───┬─▶│ Terminated │
+//	└─────┘      └──────────┘      └─────────┘     └──────────┘   │  └────────────┘
+//	                   │                                          │
+//	                   │                                          │
+//	                   │                                          │   ┌────────┐
+//	                   └──────────────────────────────────────────┴──▶│ Failed │
+//	                                                                  └────────┘
 type Service interface {
 	// StartAsync starts Service asynchronously. Service must be in New State, otherwise error is returned.
 	// Context is used as a parent context for service own context.
@@ -100,6 +99,8 @@ type NamedService interface {
 	Service
 
 	// ServiceName returns name of the service, if it has one.
+	// Subsequent calls to ServiceName can return different values,
+	// for example service may update its name based on its state.
 	ServiceName() string
 }
 

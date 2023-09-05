@@ -3,359 +3,432 @@ package logql
 import (
 	"fmt"
 
-	"github.com/cortexproject/cortex/pkg/querier/astmapper"
-	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/grafana/loki/pkg/util/math"
+
+	"github.com/grafana/loki/pkg/logql/syntax"
+	"github.com/grafana/loki/pkg/querier/astmapper"
+	"github.com/grafana/loki/pkg/storage/stores/index/stats"
+	util_log "github.com/grafana/loki/pkg/util/log"
 )
 
-// keys used in metrics
-const (
-	StreamsKey = "streams"
-	MetricsKey = "metrics"
-	SuccessKey = "success"
-	FailureKey = "failure"
-	NoopKey    = "noop"
-)
-
-// ShardingMetrics is the metrics wrapper used in shard mapping
-type ShardingMetrics struct {
-	Shards      *prometheus.CounterVec // sharded queries total, partitioned by (streams/metric)
-	ShardFactor prometheus.Histogram   // per request shard factor
-	parsed      *prometheus.CounterVec // parsed ASTs total, partitioned by (success/failure/noop)
+type ShardResolver interface {
+	Shards(expr syntax.Expr) (int, uint64, error)
+	GetStats(e syntax.Expr) (stats.Stats, error)
 }
 
-func NewShardingMetrics(registerer prometheus.Registerer) *ShardingMetrics {
-	return &ShardingMetrics{
-		Shards: promauto.With(registerer).NewCounterVec(prometheus.CounterOpts{
-			Namespace: "loki",
-			Name:      "query_frontend_shards_total",
-		}, []string{"type"}),
-		parsed: promauto.With(registerer).NewCounterVec(prometheus.CounterOpts{
-			Namespace: "loki",
-			Name:      "query_frontend_sharding_parsed_queries_total",
-		}, []string{"type"}),
-		ShardFactor: promauto.With(registerer).NewHistogram(prometheus.HistogramOpts{
-			Namespace: "loki",
-			Name:      "query_frontend_shard_factor",
-			Help:      "Number of shards per request",
-			Buckets:   prometheus.LinearBuckets(0, 16, 4), // 16 is the default shard factor for later schemas
-		}),
-	}
-}
+type ConstantShards int
 
-// shardRecorder constructs a recorder using the underlying metrics.
-func (m *ShardingMetrics) shardRecorder() *shardRecorder {
-	return &shardRecorder{
-		ShardingMetrics: m,
-	}
-}
-
-// shardRecorder wraps a vector & histogram, providing an easy way to increment sharding counts.
-// and unify them into histogram entries.
-// NOT SAFE FOR CONCURRENT USE! We avoid introducing mutex locking here
-// because AST mapping is single threaded.
-type shardRecorder struct {
-	done  bool
-	total int
-	*ShardingMetrics
-}
-
-// Add increments both the shard count and tracks it for the eventual histogram entry.
-func (r *shardRecorder) Add(x int, key string) {
-	r.total += x
-	r.Shards.WithLabelValues(key).Add(float64(x))
-}
-
-// Finish idemptotently records a histogram entry with the total shard factor.
-func (r *shardRecorder) Finish() {
-	if !r.done {
-		r.done = true
-		r.ShardFactor.Observe(float64(r.total))
-	}
-}
-
-func badASTMapping(expected string, got Expr) error {
-	return fmt.Errorf("Bad AST mapping: expected one type (%s), but got (%T)", expected, got)
-}
-
-func NewShardMapper(shards int, metrics *ShardingMetrics) (ShardMapper, error) {
-	if shards < 2 {
-		return ShardMapper{}, fmt.Errorf("Cannot create ShardMapper with <2 shards. Received %d", shards)
-	}
-	return ShardMapper{
-		shards:  shards,
-		metrics: metrics,
-	}, nil
-}
+func (s ConstantShards) Shards(_ syntax.Expr) (int, uint64, error)   { return int(s), 0, nil }
+func (s ConstantShards) GetStats(_ syntax.Expr) (stats.Stats, error) { return stats.Stats{}, nil }
 
 type ShardMapper struct {
-	shards  int
-	metrics *ShardingMetrics
+	shards  ShardResolver
+	metrics *MapperMetrics
 }
 
-func (m ShardMapper) Parse(query string) (noop bool, expr Expr, err error) {
-	parsed, err := ParseExpr(query)
+func NewShardMapper(resolver ShardResolver, metrics *MapperMetrics) ShardMapper {
+	return ShardMapper{
+		shards:  resolver,
+		metrics: metrics,
+	}
+}
+
+func NewShardMapperMetrics(registerer prometheus.Registerer) *MapperMetrics {
+	return newMapperMetrics(registerer, "shard")
+}
+
+func (m ShardMapper) Parse(query string) (noop bool, bytesPerShard uint64, expr syntax.Expr, err error) {
+	parsed, err := syntax.ParseExpr(query)
 	if err != nil {
-		return false, nil, err
+		return false, 0, nil, err
 	}
 
-	recorder := m.metrics.shardRecorder()
+	recorder := m.metrics.downstreamRecorder()
 
-	mapped, err := m.Map(parsed, recorder)
+	mapped, bytesPerShard, err := m.Map(parsed, recorder)
 	if err != nil {
-		m.metrics.parsed.WithLabelValues(FailureKey).Inc()
-		return false, nil, err
+		m.metrics.ParsedQueries.WithLabelValues(FailureKey).Inc()
+		return false, 0, nil, err
 	}
 
-	mappedStr := mapped.String()
 	originalStr := parsed.String()
+	mappedStr := mapped.String()
 	noop = originalStr == mappedStr
 	if noop {
-		m.metrics.parsed.WithLabelValues(NoopKey).Inc()
+		m.metrics.ParsedQueries.WithLabelValues(NoopKey).Inc()
 	} else {
-		m.metrics.parsed.WithLabelValues(SuccessKey).Inc()
+		m.metrics.ParsedQueries.WithLabelValues(SuccessKey).Inc()
 	}
 
 	recorder.Finish() // only record metrics for successful mappings
 
-	return noop, mapped, err
+	return noop, bytesPerShard, mapped, err
 }
 
-func (m ShardMapper) Map(expr Expr, r *shardRecorder) (Expr, error) {
+func (m ShardMapper) Map(expr syntax.Expr, r *downstreamRecorder) (syntax.Expr, uint64, error) {
+	// immediately clone the passed expr to avoid mutating the original
+	expr, err := syntax.Clone(expr)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	switch e := expr.(type) {
-	case *LiteralExpr:
-		return e, nil
-	case *MatchersExpr, *PipelineExpr:
-		return m.mapLogSelectorExpr(e.(LogSelectorExpr), r), nil
-	case *VectorAggregationExpr:
+	case *syntax.LiteralExpr:
+		return e, 0, nil
+	case *syntax.VectorExpr:
+		return e, 0, nil
+	case *syntax.MatchersExpr, *syntax.PipelineExpr:
+		return m.mapLogSelectorExpr(e.(syntax.LogSelectorExpr), r)
+	case *syntax.VectorAggregationExpr:
 		return m.mapVectorAggregationExpr(e, r)
-	case *LabelReplaceExpr:
+	case *syntax.LabelReplaceExpr:
 		return m.mapLabelReplaceExpr(e, r)
-	case *RangeAggregationExpr:
-		return m.mapRangeAggregationExpr(e, r), nil
-	case *BinOpExpr:
-		lhsMapped, err := m.Map(e.SampleExpr, r)
+	case *syntax.RangeAggregationExpr:
+		return m.mapRangeAggregationExpr(e, r)
+	case *syntax.BinOpExpr:
+		lhsMapped, lhsBytesPerShard, err := m.Map(e.SampleExpr, r)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		rhsMapped, err := m.Map(e.RHS, r)
+		rhsMapped, rhsBytesPerShard, err := m.Map(e.RHS, r)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		lhsSampleExpr, ok := lhsMapped.(SampleExpr)
+		lhsSampleExpr, ok := lhsMapped.(syntax.SampleExpr)
 		if !ok {
-			return nil, badASTMapping("SampleExpr", lhsMapped)
+			return nil, 0, badASTMapping(lhsMapped)
 		}
-		rhsSampleExpr, ok := rhsMapped.(SampleExpr)
+		rhsSampleExpr, ok := rhsMapped.(syntax.SampleExpr)
 		if !ok {
-			return nil, badASTMapping("SampleExpr", rhsMapped)
+			return nil, 0, badASTMapping(rhsMapped)
 		}
 		e.SampleExpr = lhsSampleExpr
 		e.RHS = rhsSampleExpr
-		return e, nil
+
+		// We take the maximum bytes per shard of both sides of the operation
+		bytesPerShard := uint64(math.Max(int(lhsBytesPerShard), int(rhsBytesPerShard)))
+
+		return e, bytesPerShard, nil
 	default:
-		return nil, errors.Errorf("unexpected expr type (%T) for ASTMapper type (%T) ", expr, m)
+		return nil, 0, errors.Errorf("unexpected expr type (%T) for ASTMapper type (%T) ", expr, m)
 	}
 }
 
-func (m ShardMapper) mapLogSelectorExpr(expr LogSelectorExpr, r *shardRecorder) LogSelectorExpr {
+func (m ShardMapper) mapLogSelectorExpr(expr syntax.LogSelectorExpr, r *downstreamRecorder) (syntax.LogSelectorExpr, uint64, error) {
 	var head *ConcatLogSelectorExpr
-	for i := m.shards - 1; i >= 0; i-- {
+	shards, bytesPerShard, err := m.shards.Shards(expr)
+	if err != nil {
+		return nil, 0, err
+	}
+	if shards == 0 {
+		return &ConcatLogSelectorExpr{
+			DownstreamLogSelectorExpr: DownstreamLogSelectorExpr{
+				shard:           nil,
+				LogSelectorExpr: expr,
+			},
+		}, bytesPerShard, nil
+	}
+	for i := shards - 1; i >= 0; i-- {
 		head = &ConcatLogSelectorExpr{
 			DownstreamLogSelectorExpr: DownstreamLogSelectorExpr{
 				shard: &astmapper.ShardAnnotation{
 					Shard: i,
-					Of:    m.shards,
+					Of:    shards,
 				},
 				LogSelectorExpr: expr,
 			},
 			next: head,
 		}
 	}
-	r.Add(m.shards, StreamsKey)
+	r.Add(shards, StreamsKey)
 
-	return head
+	return head, bytesPerShard, nil
 }
 
-func (m ShardMapper) mapSampleExpr(expr SampleExpr, r *shardRecorder) SampleExpr {
+func (m ShardMapper) mapSampleExpr(expr syntax.SampleExpr, r *downstreamRecorder) (syntax.SampleExpr, uint64, error) {
 	var head *ConcatSampleExpr
-	for i := m.shards - 1; i >= 0; i-- {
+	shards, bytesPerShard, err := m.shards.Shards(expr)
+	if err != nil {
+		return nil, 0, err
+	}
+	if shards == 0 {
+		return &ConcatSampleExpr{
+			DownstreamSampleExpr: DownstreamSampleExpr{
+				shard:      nil,
+				SampleExpr: expr,
+			},
+		}, bytesPerShard, nil
+	}
+	for i := shards - 1; i >= 0; i-- {
 		head = &ConcatSampleExpr{
 			DownstreamSampleExpr: DownstreamSampleExpr{
 				shard: &astmapper.ShardAnnotation{
 					Shard: i,
-					Of:    m.shards,
+					Of:    shards,
 				},
 				SampleExpr: expr,
 			},
 			next: head,
 		}
 	}
-	r.Add(m.shards, MetricsKey)
+	r.Add(shards, MetricsKey)
 
-	return head
+	return head, bytesPerShard, nil
+}
+
+// turn a vector aggr into a wrapped+sharded variant,
+// used as a subroutine in mapping
+func (m ShardMapper) wrappedShardedVectorAggr(expr *syntax.VectorAggregationExpr, r *downstreamRecorder) (*syntax.VectorAggregationExpr, uint64, error) {
+	sharded, bytesPerShard, err := m.mapSampleExpr(expr, r)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &syntax.VectorAggregationExpr{
+		Left:      sharded,
+		Grouping:  expr.Grouping,
+		Params:    expr.Params,
+		Operation: expr.Operation,
+	}, bytesPerShard, nil
 }
 
 // technically, std{dev,var} are also parallelizable if there is no cross-shard merging
 // in descendent nodes in the AST. This optimization is currently avoided for simplicity.
-func (m ShardMapper) mapVectorAggregationExpr(expr *VectorAggregationExpr, r *shardRecorder) (SampleExpr, error) {
+func (m ShardMapper) mapVectorAggregationExpr(expr *syntax.VectorAggregationExpr, r *downstreamRecorder) (syntax.SampleExpr, uint64, error) {
+	if expr.Shardable() {
+
+		switch expr.Operation {
+
+		case syntax.OpTypeSum:
+			// sum(x) -> sum(sum(x, shard=1) ++ sum(x, shard=2)...)
+			return m.wrappedShardedVectorAggr(expr, r)
+
+		case syntax.OpTypeMin, syntax.OpTypeMax:
+			if syntax.ReducesLabels(expr) {
+				// skip sharding optimizations at this level. If labels are reduced,
+				// the same series may exist on multiple shards and must be aggregated
+				// together before a max|min is applied
+				break
+			}
+			// max(x) -> max(max(x, shard=1) ++ max(x, shard=2)...)
+			// min(x) -> min(min(x, shard=1) ++ min(x, shard=2)...)
+			return m.wrappedShardedVectorAggr(expr, r)
+
+		case syntax.OpTypeAvg:
+			// avg(x) -> sum(x)/count(x), which is parallelizable
+			lhs, lhsBytesPerShard, err := m.mapVectorAggregationExpr(&syntax.VectorAggregationExpr{
+				Left:      expr.Left,
+				Grouping:  expr.Grouping,
+				Operation: syntax.OpTypeSum,
+			}, r)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			rhs, rhsBytesPerShard, err := m.mapVectorAggregationExpr(&syntax.VectorAggregationExpr{
+				Left:      expr.Left,
+				Grouping:  expr.Grouping,
+				Operation: syntax.OpTypeCount,
+			}, r)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			// We take the maximum bytes per shard of both sides of the operation
+			bytesPerShard := uint64(math.Max(int(lhsBytesPerShard), int(rhsBytesPerShard)))
+
+			return &syntax.BinOpExpr{
+				SampleExpr: lhs,
+				RHS:        rhs,
+				Op:         syntax.OpTypeDiv,
+			}, bytesPerShard, nil
+
+		case syntax.OpTypeCount:
+			if syntax.ReducesLabels(expr) {
+				// skip sharding optimizations at this level. If labels are reduced,
+				// the same series may exist on multiple shards and must be aggregated
+				// together before a count is applied
+				break
+			}
+
+			// count(x) -> sum(count(x, shard=1) ++ count(x, shard=2)...)
+			sharded, bytesPerShard, err := m.mapSampleExpr(expr, r)
+			if err != nil {
+				return nil, 0, err
+			}
+			return &syntax.VectorAggregationExpr{
+				Left:      sharded,
+				Grouping:  expr.Grouping,
+				Operation: syntax.OpTypeSum,
+			}, bytesPerShard, nil
+		default:
+			// this should not be reachable. If an operation is shardable it should
+			// have an optimization listed. Nonetheless, we log this as a warning
+			// and return the original expression unsharded.
+			level.Warn(util_log.Logger).Log(
+				"msg", "unexpected operation which appears shardable, ignoring",
+				"operation", expr.Operation,
+			)
+			exprStats, err := m.shards.GetStats(expr)
+			if err != nil {
+				return nil, 0, err
+			}
+			return expr, exprStats.Bytes, nil
+		}
+
+	}
+
 	// if this AST contains unshardable operations, don't shard this at this level,
 	// but attempt to shard a child node.
-	if !expr.Shardable() {
-		subMapped, err := m.Map(expr.Left, r)
-		if err != nil {
-			return nil, err
-		}
-		sampleExpr, ok := subMapped.(SampleExpr)
-		if !ok {
-			return nil, badASTMapping("SampleExpr", subMapped)
-		}
-
-		return &VectorAggregationExpr{
-			Left:      sampleExpr,
-			Grouping:  expr.Grouping,
-			Params:    expr.Params,
-			Operation: expr.Operation,
-		}, nil
-
+	subMapped, bytesPerShard, err := m.Map(expr.Left, r)
+	if err != nil {
+		return nil, 0, err
+	}
+	sampleExpr, ok := subMapped.(syntax.SampleExpr)
+	if !ok {
+		return nil, 0, badASTMapping(subMapped)
 	}
 
-	switch expr.Operation {
-	case OpTypeSum:
-		// sum(x) -> sum(sum(x, shard=1) ++ sum(x, shard=2)...)
-		return &VectorAggregationExpr{
-			Left:      m.mapSampleExpr(expr, r),
-			Grouping:  expr.Grouping,
-			Params:    expr.Params,
-			Operation: expr.Operation,
-		}, nil
+	return &syntax.VectorAggregationExpr{
+		Left:      sampleExpr,
+		Grouping:  expr.Grouping,
+		Params:    expr.Params,
+		Operation: expr.Operation,
+	}, bytesPerShard, nil
 
-	case OpTypeAvg:
-		// avg(x) -> sum(x)/count(x)
-		lhs, err := m.mapVectorAggregationExpr(&VectorAggregationExpr{
-			Left:      expr.Left,
-			Grouping:  expr.Grouping,
-			Operation: OpTypeSum,
-		}, r)
-		if err != nil {
-			return nil, err
-		}
-		rhs, err := m.mapVectorAggregationExpr(&VectorAggregationExpr{
-			Left:      expr.Left,
-			Grouping:  expr.Grouping,
-			Operation: OpTypeCount,
-		}, r)
-		if err != nil {
-			return nil, err
-		}
-
-		return &BinOpExpr{
-			SampleExpr: lhs,
-			RHS:        rhs,
-			Op:         OpTypeDiv,
-		}, nil
-
-	case OpTypeCount:
-		// count(x) -> sum(count(x, shard=1) ++ count(x, shard=2)...)
-		sharded := m.mapSampleExpr(expr, r)
-		return &VectorAggregationExpr{
-			Left:      sharded,
-			Grouping:  expr.Grouping,
-			Operation: OpTypeSum,
-		}, nil
-	default:
-		// this should not be reachable. If an operation is shardable it should
-		// have an optimization listed.
-		level.Warn(util_log.Logger).Log(
-			"msg", "unexpected operation which appears shardable, ignoring",
-			"operation", expr.Operation,
-		)
-		return expr, nil
-	}
 }
 
-func (m ShardMapper) mapLabelReplaceExpr(expr *LabelReplaceExpr, r *shardRecorder) (SampleExpr, error) {
-	subMapped, err := m.Map(expr.Left, r)
+func (m ShardMapper) mapLabelReplaceExpr(expr *syntax.LabelReplaceExpr, r *downstreamRecorder) (syntax.SampleExpr, uint64, error) {
+	subMapped, bytesPerShard, err := m.Map(expr.Left, r)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	cpy := *expr
-	cpy.Left = subMapped.(SampleExpr)
-	return &cpy, nil
+	cpy.Left = subMapped.(syntax.SampleExpr)
+	return &cpy, bytesPerShard, nil
 }
 
-func (m ShardMapper) mapRangeAggregationExpr(expr *RangeAggregationExpr, r *shardRecorder) SampleExpr {
-	if hasLabelModifier(expr) {
-		// if an expr can modify labels this means multiple shards can returns the same labelset.
-		// When this happens the merge strategy needs to be different than a simple concatenation.
-		// For instance for rates we need to sum data from different shards but same series.
-		// Since we currently support only concatenation as merge strategy, we skip those queries.
-		return expr
-	}
-	switch expr.Operation {
-	case OpRangeTypeCount, OpRangeTypeRate, OpRangeTypeBytesRate, OpRangeTypeBytes:
-		// count_over_time(x) -> count_over_time(x, shard=1) ++ count_over_time(x, shard=2)...
-		// rate(x) -> rate(x, shard=1) ++ rate(x, shard=2)...
-		// same goes for bytes_rate and bytes_over_time
-		return m.mapSampleExpr(expr, r)
-	default:
-		return expr
-	}
+// These functions require a different merge strategy than the default
+// concatenation.
+// This is because the same label sets may exist on multiple shards when label-reducing parsing is applied or when
+// grouping by some subset of the labels. In this case, the resulting vector may have multiple values for the same
+// series and we need to combine them appropriately given a particular operation.
+var rangeMergeMap = map[string]string{
+	// all these may be summed
+	syntax.OpRangeTypeCount:     syntax.OpTypeSum,
+	syntax.OpRangeTypeRate:      syntax.OpTypeSum,
+	syntax.OpRangeTypeBytes:     syntax.OpTypeSum,
+	syntax.OpRangeTypeBytesRate: syntax.OpTypeSum,
+	syntax.OpRangeTypeSum:       syntax.OpTypeSum,
+
+	// min & max require taking the min|max of the shards
+	syntax.OpRangeTypeMin: syntax.OpTypeMin,
+	syntax.OpRangeTypeMax: syntax.OpTypeMax,
 }
 
-// hasLabelModifier tells if an expression contains pipelines that can modify stream labels
-// parsers introduce new labels but does not alter original one for instance.
-func hasLabelModifier(expr *RangeAggregationExpr) bool {
-	switch ex := expr.Left.Left.(type) {
-	case *MatchersExpr:
-		return false
-	case *PipelineExpr:
-		for _, p := range ex.MultiStages {
-			if _, ok := p.(*LabelFmtExpr); ok {
-				return true
-			}
+func (m ShardMapper) mapRangeAggregationExpr(expr *syntax.RangeAggregationExpr, r *downstreamRecorder) (syntax.SampleExpr, uint64, error) {
+	if !expr.Shardable() {
+		exprStats, err := m.shards.GetStats(expr)
+		if err != nil {
+			return nil, 0, err
 		}
+		return expr, exprStats.Bytes, nil
 	}
-	return false
+
+	switch expr.Operation {
+
+	case syntax.OpRangeTypeCount, syntax.OpRangeTypeRate, syntax.OpRangeTypeBytes, syntax.OpRangeTypeBytesRate, syntax.OpRangeTypeSum, syntax.OpRangeTypeMax, syntax.OpRangeTypeMin:
+		// if the expr can reduce labels, it can cause the same labelset to
+		// exist on separate shards and we'll need to merge the results
+		// accordingly. If it does not reduce labels and has no special grouping
+		// aggregation, we can shard it as normal via concatenation.
+		potentialConflict := syntax.ReducesLabels(expr)
+		if !potentialConflict && (expr.Grouping == nil || expr.Grouping.Noop()) {
+			return m.mapSampleExpr(expr, r)
+		}
+
+		// range aggregation groupings default to `without ()` behavior
+		// so we explicitly set the wrapping vector aggregation to this
+		// for parity when it's not explicitly set
+		grouping := expr.Grouping
+		if grouping == nil {
+			grouping = &syntax.Grouping{Without: true}
+		}
+
+		mapped, bytes, err := m.mapSampleExpr(expr, r)
+		// max_over_time(_) -> max without() (max_over_time(_) ++ max_over_time(_)...)
+		// max_over_time(_) by (foo) -> max by (foo) (max_over_time(_) by (foo) ++ max_over_time(_) by (foo)...)
+		merger, ok := rangeMergeMap[expr.Operation]
+		if !ok {
+			return nil, 0, fmt.Errorf(
+				"error while finding merge operation for %s", expr.Operation,
+			)
+		}
+		return &syntax.VectorAggregationExpr{
+			Left:      mapped,
+			Grouping:  grouping,
+			Operation: merger,
+		}, bytes, err
+
+	case syntax.OpRangeTypeAvg:
+		potentialConflict := syntax.ReducesLabels(expr)
+		if !potentialConflict && (expr.Grouping == nil || expr.Grouping.Noop()) {
+			return m.mapSampleExpr(expr, r)
+		}
+
+		// avg_overtime() by (foo) -> sum by (foo) (sum_over_time()) / sum by (foo) (count_over_time())
+		lhs, lhsBytesPerShard, err := m.mapVectorAggregationExpr(&syntax.VectorAggregationExpr{
+			Left: &syntax.RangeAggregationExpr{
+				Left:      expr.Left,
+				Operation: syntax.OpRangeTypeSum,
+			},
+			Grouping:  expr.Grouping,
+			Operation: syntax.OpTypeSum,
+		}, r)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// Strip unwrap from log range
+		countOverTimeSelector, err := expr.Left.WithoutUnwrap()
+		if err != nil {
+			return nil, 0, err
+		}
+
+		rhs, rhsBytesPerShard, err := m.mapVectorAggregationExpr(&syntax.VectorAggregationExpr{
+			Left: &syntax.RangeAggregationExpr{
+				Left:      countOverTimeSelector,
+				Operation: syntax.OpRangeTypeCount,
+			},
+			Grouping:  expr.Grouping,
+			Operation: syntax.OpTypeSum,
+		}, r)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// We take the maximum bytes per shard of both sides of the operation
+		bytesPerShard := uint64(math.Max(int(lhsBytesPerShard), int(rhsBytesPerShard)))
+
+		return &syntax.BinOpExpr{
+			SampleExpr: lhs,
+			RHS:        rhs,
+			Op:         syntax.OpTypeDiv,
+		}, bytesPerShard, nil
+
+	default:
+		// don't shard if there's not an appropriate optimization
+		exprStats, err := m.shards.GetStats(expr)
+		if err != nil {
+			return nil, 0, err
+		}
+		return expr, exprStats.Bytes, nil
+	}
 }
 
-// shardableOps lists the operations which may be sharded.
-// topk, botk, max, & min all must be concatenated and then evaluated in order to avoid
-// potential data loss due to series distribution across shards.
-// For example, grouping by `cluster` for a `max` operation may yield
-// 2 results on the first shard and 10 results on the second. If we prematurely
-// calculated `max`s on each shard, the shard/label combination with `2` may be
-// discarded and some other combination with `11` may be reported falsely as the max.
-//
-// Explanation: this is my (owen-d) best understanding.
-//
-// For an operation to be shardable, first the sample-operation itself must be associative like (+, *) but not (%, /, ^).
-// Secondly, if the operation is part of a vector aggregation expression or utilizes logical/set binary ops,
-// the vector operation must be distributive over the sample-operation.
-// This ensures that the vector merging operation can be applied repeatedly to data in different shards.
-// references:
-// https://en.wikipedia.org/wiki/Associative_property
-// https://en.wikipedia.org/wiki/Distributive_property
-var shardableOps = map[string]bool{
-	// vector ops
-	OpTypeSum: true,
-	// avg is only marked as shardable because we remap it into sum/count.
-	OpTypeAvg:   true,
-	OpTypeCount: true,
-
-	// range vector ops
-	OpRangeTypeCount:     true,
-	OpRangeTypeRate:      true,
-	OpRangeTypeBytes:     true,
-	OpRangeTypeBytesRate: true,
-	OpRangeTypeSum:       true,
-	OpRangeTypeMax:       true,
-	OpRangeTypeMin:       true,
-
-	// binops - arith
-	OpTypeAdd: true,
-	OpTypeMul: true,
+func badASTMapping(got syntax.Expr) error {
+	return fmt.Errorf("bad AST mapping: expected SampleExpr, but got (%T)", got)
 }

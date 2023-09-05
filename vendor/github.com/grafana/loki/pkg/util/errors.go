@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/go-kit/log/level"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/grafana/loki/pkg/util/log"
 )
 
 // LogError logs any error returned by f; useful when deferring Close etc.
@@ -70,27 +71,13 @@ func (es MultiError) Err() error {
 
 // Is tells if all errors are the same as the target error.
 func (es MultiError) Is(target error) bool {
-	for _, err := range es {
-		if !errors.Is(err, target) {
-			return false
-		}
-	}
-	return true
-}
-
-// IsCancel tells if all errors are either context.Canceled or grpc codes.Canceled.
-func (es MultiError) IsCancel() bool {
 	if len(es) == 0 {
 		return false
 	}
 	for _, err := range es {
-		if errors.Is(err, context.Canceled) {
-			continue
+		if !errors.Is(err, target) {
+			return false
 		}
-		if IsConnCanceled(err) {
-			continue
-		}
-		return false
 	}
 	return true
 }
@@ -111,6 +98,37 @@ func (es MultiError) IsDeadlineExceeded() bool {
 		return false
 	}
 	return true
+}
+
+// GroupedErrors implements the error interface, and it contains the errors used to construct it
+// grouped by the error message.
+type GroupedErrors struct {
+	MultiError
+}
+
+// Error Returns a concatenated string of the errors grouped by the error message along with the number of occurrences
+// of each error message.
+func (es GroupedErrors) Error() string {
+	mapErrs := make(map[string]int, len(es.MultiError))
+	for _, err := range es.MultiError {
+		mapErrs[err.Error()]++
+	}
+
+	var idx int
+	var buf bytes.Buffer
+	uniqueErrs := len(mapErrs)
+	for err, n := range mapErrs {
+		if idx != 0 {
+			buf.WriteString("; ")
+		}
+		if uniqueErrs > 1 || n > 1 {
+			_, _ = fmt.Fprintf(&buf, "%d errors like: ", n)
+		}
+		buf.WriteString(err)
+		idx++
+	}
+
+	return buf.String()
 }
 
 // IsConnCanceled returns true, if error is from a closed gRPC connection.

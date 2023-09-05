@@ -10,9 +10,9 @@ import (
 
 // Config configures a Backoff
 type Config struct {
-	MinBackoff time.Duration `yaml:"min_period"`  // start backoff at this level
-	MaxBackoff time.Duration `yaml:"max_period"`  // increase exponentially to this level
-	MaxRetries int           `yaml:"max_retries"` // give up after this many; zero means infinite retries
+	MinBackoff time.Duration `yaml:"min_period" category:"advanced"`  // start backoff at this level
+	MaxBackoff time.Duration `yaml:"max_period" category:"advanced"`  // increase exponentially to this level
+	MaxRetries int           `yaml:"max_retries" category:"advanced"` // give up after this many; zero means infinite retries
 }
 
 // RegisterFlagsWithPrefix for Config.
@@ -77,9 +77,12 @@ func (b *Backoff) Wait() {
 	sleepTime := b.NextDelay()
 
 	if b.Ongoing() {
+		timer := time.NewTimer(sleepTime)
+		defer timer.Stop()
+
 		select {
 		case <-b.ctx.Done():
-		case <-time.After(sleepTime):
+		case <-timer.C:
 		}
 	}
 }

@@ -89,6 +89,12 @@ var amazonS3HostHyphen = regexp.MustCompile(`^s3-(.*?).amazonaws.com$`)
 // amazonS3HostDualStack - regular expression used to determine if an arg is s3 host dualstack.
 var amazonS3HostDualStack = regexp.MustCompile(`^s3.dualstack.(.*?).amazonaws.com$`)
 
+// amazonS3HostFIPS - regular expression used to determine if an arg is s3 FIPS host.
+var amazonS3HostFIPS = regexp.MustCompile(`^s3-fips.(.*?).amazonaws.com$`)
+
+// amazonS3HostFIPSDualStack - regular expression used to determine if an arg is s3 FIPS host dualstack.
+var amazonS3HostFIPSDualStack = regexp.MustCompile(`^s3-fips.dualstack.(.*?).amazonaws.com$`)
+
 // amazonS3HostDot - regular expression used to determine if an arg is s3 host in . style.
 var amazonS3HostDot = regexp.MustCompile(`^s3.(.*?).amazonaws.com$`)
 
@@ -104,6 +110,9 @@ var elbAmazonRegex = regexp.MustCompile(`elb(.*?).amazonaws.com$`)
 // Regular expression used to determine if the arg is elb host in china.
 var elbAmazonCnRegex = regexp.MustCompile(`elb(.*?).amazonaws.com.cn$`)
 
+// amazonS3HostPrivateLink - regular expression used to determine if an arg is s3 host in AWS PrivateLink interface endpoints style
+var amazonS3HostPrivateLink = regexp.MustCompile(`^(?:bucket|accesspoint).vpce-.*?.s3.(.*?).vpce.amazonaws.com$`)
+
 // GetRegionFromURL - returns a region from url host.
 func GetRegionFromURL(endpointURL url.URL) string {
 	if endpointURL == sentinelURL {
@@ -112,33 +121,54 @@ func GetRegionFromURL(endpointURL url.URL) string {
 	if endpointURL.Host == "s3-external-1.amazonaws.com" {
 		return ""
 	}
-	if IsAmazonGovCloudEndpoint(endpointURL) {
-		return "us-gov-west-1"
-	}
+
 	// if elb's are used we cannot calculate which region it may be, just return empty.
 	if elbAmazonRegex.MatchString(endpointURL.Host) || elbAmazonCnRegex.MatchString(endpointURL.Host) {
 		return ""
 	}
-	parts := amazonS3HostDualStack.FindStringSubmatch(endpointURL.Host)
+
+	// We check for FIPS dualstack matching first to avoid the non-greedy
+	// regex for FIPS non-dualstack matching a dualstack URL
+	parts := amazonS3HostFIPSDualStack.FindStringSubmatch(endpointURL.Host)
 	if len(parts) > 1 {
 		return parts[1]
 	}
+
+	parts = amazonS3HostFIPS.FindStringSubmatch(endpointURL.Host)
+	if len(parts) > 1 {
+		return parts[1]
+	}
+
+	parts = amazonS3HostDualStack.FindStringSubmatch(endpointURL.Host)
+	if len(parts) > 1 {
+		return parts[1]
+	}
+
 	parts = amazonS3HostHyphen.FindStringSubmatch(endpointURL.Host)
 	if len(parts) > 1 {
 		return parts[1]
 	}
+
 	parts = amazonS3ChinaHost.FindStringSubmatch(endpointURL.Host)
 	if len(parts) > 1 {
 		return parts[1]
 	}
+
 	parts = amazonS3ChinaHostDualStack.FindStringSubmatch(endpointURL.Host)
 	if len(parts) > 1 {
 		return parts[1]
 	}
+
 	parts = amazonS3HostDot.FindStringSubmatch(endpointURL.Host)
 	if len(parts) > 1 {
 		return parts[1]
 	}
+
+	parts = amazonS3HostPrivateLink.FindStringSubmatch(endpointURL.Host)
+	if len(parts) > 1 {
+		return parts[1]
+	}
+
 	return ""
 }
 
@@ -161,44 +191,34 @@ func IsAmazonGovCloudEndpoint(endpointURL url.URL) bool {
 		return false
 	}
 	return (endpointURL.Host == "s3-us-gov-west-1.amazonaws.com" ||
+		endpointURL.Host == "s3-us-gov-east-1.amazonaws.com" ||
 		IsAmazonFIPSGovCloudEndpoint(endpointURL))
 }
 
-// IsAmazonFIPSGovCloudEndpoint - Match if it is exactly Amazon S3 FIPS GovCloud endpoint.
-// See https://aws.amazon.com/compliance/fips.
+// IsAmazonFIPSGovCloudEndpoint - match if the endpoint is FIPS and GovCloud.
 func IsAmazonFIPSGovCloudEndpoint(endpointURL url.URL) bool {
 	if endpointURL == sentinelURL {
 		return false
 	}
-	return endpointURL.Host == "s3-fips-us-gov-west-1.amazonaws.com" ||
-		endpointURL.Host == "s3-fips.dualstack.us-gov-west-1.amazonaws.com"
-}
-
-// IsAmazonFIPSUSEastWestEndpoint - Match if it is exactly Amazon S3 FIPS US East/West endpoint.
-// See https://aws.amazon.com/compliance/fips.
-func IsAmazonFIPSUSEastWestEndpoint(endpointURL url.URL) bool {
-	if endpointURL == sentinelURL {
-		return false
-	}
-	switch endpointURL.Host {
-	case "s3-fips.us-east-2.amazonaws.com":
-	case "s3-fips.dualstack.us-west-1.amazonaws.com":
-	case "s3-fips.dualstack.us-west-2.amazonaws.com":
-	case "s3-fips.dualstack.us-east-2.amazonaws.com":
-	case "s3-fips.dualstack.us-east-1.amazonaws.com":
-	case "s3-fips.us-west-1.amazonaws.com":
-	case "s3-fips.us-west-2.amazonaws.com":
-	case "s3-fips.us-east-1.amazonaws.com":
-	default:
-		return false
-	}
-	return true
+	return IsAmazonFIPSEndpoint(endpointURL) && strings.Contains(endpointURL.Host, "us-gov-")
 }
 
 // IsAmazonFIPSEndpoint - Match if it is exactly Amazon S3 FIPS endpoint.
 // See https://aws.amazon.com/compliance/fips.
 func IsAmazonFIPSEndpoint(endpointURL url.URL) bool {
-	return IsAmazonFIPSUSEastWestEndpoint(endpointURL) || IsAmazonFIPSGovCloudEndpoint(endpointURL)
+	if endpointURL == sentinelURL {
+		return false
+	}
+	return strings.HasPrefix(endpointURL.Host, "s3-fips") && strings.HasSuffix(endpointURL.Host, ".amazonaws.com")
+}
+
+// IsAmazonPrivateLinkEndpoint - Match if it is exactly Amazon S3 PrivateLink interface endpoint
+// See https://docs.aws.amazon.com/AmazonS3/latest/userguide/privatelink-interface-endpoints.html.
+func IsAmazonPrivateLinkEndpoint(endpointURL url.URL) bool {
+	if endpointURL == sentinelURL {
+		return false
+	}
+	return amazonS3HostPrivateLink.MatchString(endpointURL.Host)
 }
 
 // IsGoogleEndpoint - Match if it is exactly Google cloud storage endpoint.
@@ -211,7 +231,7 @@ func IsGoogleEndpoint(endpointURL url.URL) bool {
 
 // Expects ascii encoded strings - from output of urlEncodePath
 func percentEncodeSlash(s string) string {
-	return strings.Replace(s, "/", "%2F", -1)
+	return strings.ReplaceAll(s, "/", "%2F")
 }
 
 // QueryEncode - encodes query values in their URL encoded form. In
@@ -304,12 +324,12 @@ func EncodePath(pathName string) string {
 			encodedPathname.WriteRune(s)
 			continue
 		default:
-			len := utf8.RuneLen(s)
-			if len < 0 {
+			l := utf8.RuneLen(s)
+			if l < 0 {
 				// if utf8 cannot convert return the same string as is
 				return pathName
 			}
-			u := make([]byte, len)
+			u := make([]byte, l)
 			utf8.EncodeRune(u, s)
 			for _, r := range u {
 				hex := hex.EncodeToString([]byte{r})

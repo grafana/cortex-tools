@@ -1,6 +1,6 @@
 /*
  * MinIO Go Library for Amazon S3 Compatible Cloud Storage
- * Copyright 2015-2018 MinIO, Inc.
+ * Copyright 2015-2023 MinIO, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,20 +20,23 @@ package minio
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	md5simd "github.com/minio/md5-simd"
@@ -45,7 +48,7 @@ import (
 
 // Client implements Amazon S3 compatible methods.
 type Client struct {
-	///  Standard options.
+	//  Standard options.
 
 	// Parsed endpoint url provided by the user.
 	endpointURL *url.URL
@@ -67,6 +70,7 @@ type Client struct {
 
 	// Needs allocation.
 	httpClient     *http.Client
+	httpTrace      *httptrace.ClientTrace
 	bucketLocCache *bucketLocationCache
 
 	// Advanced functionality.
@@ -90,6 +94,10 @@ type Client struct {
 	// Factory for MD5 hash functions.
 	md5Hasher    func() md5simd.Hasher
 	sha256Hasher func() md5simd.Hasher
+
+	healthStatus int32
+
+	trailingHeaderSupport bool
 }
 
 // Options for New method
@@ -97,8 +105,19 @@ type Options struct {
 	Creds        *credentials.Credentials
 	Secure       bool
 	Transport    http.RoundTripper
+	Trace        *httptrace.ClientTrace
 	Region       string
 	BucketLookup BucketLookupType
+
+	// Allows setting a custom region lookup based on URL pattern
+	// not all URL patterns are covered by this library so if you
+	// have a custom endpoints with many regions you can use this
+	// function to perform region lookups appropriately.
+	CustomRegionViaURL func(u url.URL) string
+
+	// TrailingHeaders indicates server support of trailing headers.
+	// Only supported for v4 signatures.
+	TrailingHeaders bool
 
 	// Custom hash routines. Leave nil to use standard.
 	CustomMD5    func() md5simd.Hasher
@@ -108,13 +127,13 @@ type Options struct {
 // Global constants.
 const (
 	libraryName    = "minio-go"
-	libraryVersion = "v7.0.10"
+	libraryVersion = "v7.0.63"
 )
 
 // User Agent should always following the below style.
 // Please open an issue to discuss any new changes here.
 //
-//       MinIO (OS; ARCH) LIB/VER APP/VER
+//	MinIO (OS; ARCH) LIB/VER APP/VER
 const (
 	libraryUserAgentPrefix = "MinIO (" + runtime.GOOS + "; " + runtime.GOARCH + ") "
 	libraryUserAgent       = libraryUserAgentPrefix + libraryName + "/" + libraryVersion
@@ -138,10 +157,6 @@ func New(endpoint string, opts *Options) (*Client, error) {
 	clnt, err := privateNew(endpoint, opts)
 	if err != nil {
 		return nil, err
-	}
-	// Google cloud storage should be set to signature V2, force it if not.
-	if s3utils.IsGoogleEndpoint(*clnt.endpointURL) {
-		clnt.overrideSignerType = credentials.SignatureV2
 	}
 	// If Amazon S3 set to signature v4.
 	if s3utils.IsAmazonEndpoint(*clnt.endpointURL) {
@@ -179,67 +194,6 @@ func (r *lockedRandSource) Seed(seed int64) {
 	r.lk.Unlock()
 }
 
-// Redirect requests by re signing the request.
-func (c *Client) redirectHeaders(req *http.Request, via []*http.Request) error {
-	if len(via) >= 5 {
-		return errors.New("stopped after 5 redirects")
-	}
-	if len(via) == 0 {
-		return nil
-	}
-	lastRequest := via[len(via)-1]
-	var reAuth bool
-	for attr, val := range lastRequest.Header {
-		// if hosts do not match do not copy Authorization header
-		if attr == "Authorization" && req.Host != lastRequest.Host {
-			reAuth = true
-			continue
-		}
-		if _, ok := req.Header[attr]; !ok {
-			req.Header[attr] = val
-		}
-	}
-
-	*c.endpointURL = *req.URL
-
-	value, err := c.credsProvider.Get()
-	if err != nil {
-		return err
-	}
-	var (
-		signerType      = value.SignerType
-		accessKeyID     = value.AccessKeyID
-		secretAccessKey = value.SecretAccessKey
-		sessionToken    = value.SessionToken
-		region          = c.region
-	)
-
-	// Custom signer set then override the behavior.
-	if c.overrideSignerType != credentials.SignatureDefault {
-		signerType = c.overrideSignerType
-	}
-
-	// If signerType returned by credentials helper is anonymous,
-	// then do not sign regardless of signerType override.
-	if value.SignerType == credentials.SignatureAnonymous {
-		signerType = credentials.SignatureAnonymous
-	}
-
-	if reAuth {
-		// Check if there is no region override, if not get it from the URL if possible.
-		if region == "" {
-			region = s3utils.GetRegionFromURL(*c.endpointURL)
-		}
-		switch {
-		case signerType.IsV2():
-			return errors.New("signature V2 cannot support redirection")
-		case signerType.IsV4():
-			signer.SignV4(*req, accessKeyID, secretAccessKey, sessionToken, getDefaultLocation(*c.endpointURL, region))
-		}
-	}
-	return nil
-}
-
 func privateNew(endpoint string, opts *Options) (*Client, error) {
 	// construct endpoint.
 	endpointURL, err := getEndpointURL(endpoint, opts.Secure)
@@ -274,16 +228,24 @@ func privateNew(endpoint string, opts *Options) (*Client, error) {
 		}
 	}
 
+	clnt.httpTrace = opts.Trace
+
 	// Instantiate http client and bucket location cache.
 	clnt.httpClient = &http.Client{
-		Jar:           jar,
-		Transport:     transport,
-		CheckRedirect: clnt.redirectHeaders,
+		Jar:       jar,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	// Sets custom region, if region is empty bucket location cache is used automatically.
 	if opts.Region == "" {
-		opts.Region = s3utils.GetRegionFromURL(*clnt.endpointURL)
+		if opts.CustomRegionViaURL != nil {
+			opts.Region = opts.CustomRegionViaURL(*clnt.endpointURL)
+		} else {
+			opts.Region = s3utils.GetRegionFromURL(*clnt.endpointURL)
+		}
 	}
 	clnt.region = opts.Region
 
@@ -302,15 +264,22 @@ func privateNew(endpoint string, opts *Options) (*Client, error) {
 	if clnt.sha256Hasher == nil {
 		clnt.sha256Hasher = newSHA256Hasher
 	}
+
+	clnt.trailingHeaderSupport = opts.TrailingHeaders && clnt.overrideSignerType.IsV4()
+
 	// Sets bucket lookup style, whether server accepts DNS or Path lookup. Default is Auto - determined
 	// by the SDK. When Auto is specified, DNS lookup is used for Amazon/Google cloud endpoints and Path for all other endpoints.
 	clnt.lookup = opts.BucketLookup
+
+	// healthcheck is not initialized
+	clnt.healthStatus = unknown
+
 	// Return.
 	return clnt, nil
 }
 
 // SetAppInfo - add application details to user agent.
-func (c *Client) SetAppInfo(appName string, appVersion string) {
+func (c *Client) SetAppInfo(appName, appVersion string) {
 	// if app name and version not set, we do not set a new user agent.
 	if appName != "" && appVersion != "" {
 		c.appInfo.appName = appName
@@ -364,17 +333,19 @@ func (c *Client) SetS3TransferAccelerate(accelerateEndpoint string) {
 // Hash materials provides relevant initialized hash algo writers
 // based on the expected signature type.
 //
-//  - For signature v4 request if the connection is insecure compute only sha256.
-//  - For signature v4 request if the connection is secure compute only md5.
-//  - For anonymous request compute md5.
-func (c *Client) hashMaterials(isMd5Requested bool) (hashAlgos map[string]md5simd.Hasher, hashSums map[string][]byte) {
+//   - For signature v4 request if the connection is insecure compute only sha256.
+//   - For signature v4 request if the connection is secure compute only md5.
+//   - For anonymous request compute md5.
+func (c *Client) hashMaterials(isMd5Requested, isSha256Requested bool) (hashAlgos map[string]md5simd.Hasher, hashSums map[string][]byte) {
 	hashSums = make(map[string][]byte)
 	hashAlgos = make(map[string]md5simd.Hasher)
 	if c.overrideSignerType.IsV4() {
 		if c.secure {
 			hashAlgos["md5"] = c.md5Hasher()
 		} else {
-			hashAlgos["sha256"] = c.sha256Hasher()
+			if isSha256Requested {
+				hashAlgos["sha256"] = c.sha256Hasher()
+			}
 		}
 	} else {
 		if c.overrideSignerType.IsAnonymous() {
@@ -387,17 +358,96 @@ func (c *Client) hashMaterials(isMd5Requested bool) (hashAlgos map[string]md5sim
 	return hashAlgos, hashSums
 }
 
+const (
+	unknown = -1
+	offline = 0
+	online  = 1
+)
+
+// IsOnline returns true if healthcheck enabled and client is online.
+// If HealthCheck function has not been called this will always return true.
+func (c *Client) IsOnline() bool {
+	return !c.IsOffline()
+}
+
+// sets online healthStatus to offline
+func (c *Client) markOffline() {
+	atomic.CompareAndSwapInt32(&c.healthStatus, online, offline)
+}
+
+// IsOffline returns true if healthcheck enabled and client is offline
+// If HealthCheck function has not been called this will always return false.
+func (c *Client) IsOffline() bool {
+	return atomic.LoadInt32(&c.healthStatus) == offline
+}
+
+// HealthCheck starts a healthcheck to see if endpoint is up.
+// Returns a context cancellation function, to stop the health check,
+// and an error if health check is already started.
+func (c *Client) HealthCheck(hcDuration time.Duration) (context.CancelFunc, error) {
+	if atomic.LoadInt32(&c.healthStatus) != unknown {
+		return nil, fmt.Errorf("health check is running")
+	}
+	if hcDuration < 1*time.Second {
+		return nil, fmt.Errorf("health check duration should be at least 1 second")
+	}
+	probeBucketName := randString(60, rand.NewSource(time.Now().UnixNano()), "probe-health-")
+	ctx, cancelFn := context.WithCancel(context.Background())
+	atomic.StoreInt32(&c.healthStatus, offline)
+	{
+		// Change to online, if we can connect.
+		gctx, gcancel := context.WithTimeout(ctx, 3*time.Second)
+		_, err := c.getBucketLocation(gctx, probeBucketName)
+		gcancel()
+		if !IsNetworkOrHostDown(err, false) {
+			switch ToErrorResponse(err).Code {
+			case "NoSuchBucket", "AccessDenied", "":
+				atomic.CompareAndSwapInt32(&c.healthStatus, offline, online)
+			}
+		}
+	}
+
+	go func(duration time.Duration) {
+		timer := time.NewTimer(duration)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				atomic.StoreInt32(&c.healthStatus, unknown)
+				return
+			case <-timer.C:
+				// Do health check the first time and ONLY if the connection is marked offline
+				if c.IsOffline() {
+					gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
+					_, err := c.getBucketLocation(gctx, probeBucketName)
+					gcancel()
+					if !IsNetworkOrHostDown(err, false) {
+						switch ToErrorResponse(err).Code {
+						case "NoSuchBucket", "AccessDenied", "":
+							atomic.CompareAndSwapInt32(&c.healthStatus, offline, online)
+						}
+					}
+				}
+
+				timer.Reset(duration)
+			}
+		}
+	}(hcDuration)
+	return cancelFn, nil
+}
+
 // requestMetadata - is container for all the values to make a request.
 type requestMetadata struct {
 	// If set newRequest presigns the URL.
 	presignURL bool
 
 	// User supplied.
-	bucketName   string
-	objectName   string
-	queryValues  url.Values
-	customHeader http.Header
-	expires      int64
+	bucketName         string
+	objectName         string
+	queryValues        url.Values
+	customHeader       http.Header
+	extraPresignHeader http.Header
+	expires            int64
 
 	// Generated by our internal code.
 	bucketLocation   string
@@ -405,10 +455,13 @@ type requestMetadata struct {
 	contentLength    int64
 	contentMD5Base64 string // carries base64 encoded md5sum
 	contentSHA256Hex string // carries hex encoded sha256sum
+	streamSha256     bool
+	addCrc           bool
+	trailer          http.Header // (http.Request).Trailer. Requires v4 signature.
 }
 
 // dumpHTTP - dump HTTP request and response.
-func (c Client) dumpHTTP(req *http.Request, resp *http.Response) error {
+func (c *Client) dumpHTTP(req *http.Request, resp *http.Response) error {
 	// Starts http dump.
 	_, err := fmt.Fprintln(c.traceOutput, "---------START-HTTP---------")
 	if err != nil {
@@ -468,8 +521,14 @@ func (c Client) dumpHTTP(req *http.Request, resp *http.Response) error {
 }
 
 // do - execute http request.
-func (c Client) do(req *http.Request) (*http.Response, error) {
-	resp, err := c.httpClient.Do(req)
+func (c *Client) do(req *http.Request) (resp *http.Response, err error) {
+	defer func() {
+		if IsNetworkOrHostDown(err, false) {
+			c.markOffline()
+		}
+	}()
+
+	resp, err = c.httpClient.Do(req)
 	if err != nil {
 		// Handle this specifically for now until future Golang versions fix this issue properly.
 		if urlErr, ok := err.(*url.Error); ok {
@@ -512,10 +571,14 @@ var successStatus = []int{
 // executeMethod - instantiates a given method, and retries the
 // request upon any error up to maxRetries attempts in a binomially
 // delayed manner using a standard back off algorithm.
-func (c Client) executeMethod(ctx context.Context, method string, metadata requestMetadata) (res *http.Response, err error) {
+func (c *Client) executeMethod(ctx context.Context, method string, metadata requestMetadata) (res *http.Response, err error) {
+	if c.IsOffline() {
+		return nil, errors.New(c.endpointURL.String() + " is offline.")
+	}
+
 	var retryable bool       // Indicates if request can be retried.
 	var bodySeeker io.Seeker // Extracted seeker from io.Reader.
-	var reqRetry = MaxRetry  // Indicates how many times we can retry the request
+	reqRetry := MaxRetry     // Indicates how many times we can retry the request
 
 	if metadata.contentBody != nil {
 		// Check if body is seekable then it is retryable.
@@ -544,9 +607,6 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 	// Indicate to our routine to exit cleanly upon return.
 	defer cancel()
 
-	// Blank indentifier is kept here on purpose since 'range' without
-	// blank identifiers is only supported since go1.4
-	// https://golang.org/doc/go1.4#forrange.
 	for range c.newRetryTimer(retryCtx, reqRetry, DefaultRetryUnit, DefaultRetryCap, MaxJitter) {
 		// Retry executes the following function body if request has an
 		// error until maxRetries have been exhausted, retry attempts are
@@ -560,6 +620,17 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 			}
 		}
 
+		if metadata.addCrc {
+			if metadata.trailer == nil {
+				metadata.trailer = make(http.Header, 1)
+			}
+			crc := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+			metadata.contentBody = newHashReaderWrapper(metadata.contentBody, crc, func(hash []byte) {
+				// Update trailer when done.
+				metadata.trailer.Set("x-amz-checksum-crc32c", base64.StdEncoding.EncodeToString(hash))
+			})
+			metadata.trailer.Set("x-amz-checksum-crc32c", base64.StdEncoding.EncodeToString(crc.Sum(nil)))
+		}
 		// Instantiate a new request.
 		var req *http.Request
 		req, err = c.newRequest(ctx, method, metadata)
@@ -568,18 +639,18 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 			if isS3CodeRetryable(errResponse.Code) {
 				continue // Retry.
 			}
+
 			return nil, err
 		}
 
 		// Initiate the request.
 		res, err = c.do(req)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
+			if isRequestErrorRetryable(err) {
+				// Retry the request
+				continue
 			}
-
-			// Retry the request
-			continue
+			return nil, err
 		}
 
 		// For any known successful http status, return quickly.
@@ -590,7 +661,7 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 		}
 
 		// Read the body to be saved later.
-		errBodyBytes, err := ioutil.ReadAll(res.Body)
+		errBodyBytes, err := io.ReadAll(res.Body)
 		// res.Body should be closed
 		closeResponse(res)
 		if err != nil {
@@ -599,20 +670,20 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 
 		// Save the body.
 		errBodySeeker := bytes.NewReader(errBodyBytes)
-		res.Body = ioutil.NopCloser(errBodySeeker)
+		res.Body = io.NopCloser(errBodySeeker)
 
 		// For errors verify if its retryable otherwise fail quickly.
 		errResponse := ToErrorResponse(httpRespToErrorResponse(res, metadata.bucketName, metadata.objectName))
 
 		// Save the body back again.
 		errBodySeeker.Seek(0, 0) // Seek back to starting point.
-		res.Body = ioutil.NopCloser(errBodySeeker)
+		res.Body = io.NopCloser(errBodySeeker)
 
 		// Bucket region if set in error response and the error
 		// code dictates invalid region, we can retry the request
 		// with the new region.
 		//
-		// Additionally we should only retry if bucketLocation and custom
+		// Additionally, we should only retry if bucketLocation and custom
 		// region is empty.
 		if c.region == "" {
 			switch errResponse.Code {
@@ -668,7 +739,7 @@ func (c Client) executeMethod(ctx context.Context, method string, metadata reque
 }
 
 // newRequest - instantiate a new HTTP request for a given method.
-func (c Client) newRequest(ctx context.Context, method string, metadata requestMetadata) (req *http.Request, err error) {
+func (c *Client) newRequest(ctx context.Context, method string, metadata requestMetadata) (req *http.Request, err error) {
 	// If no method is supplied default to 'POST'.
 	if method == "" {
 		method = http.MethodPost
@@ -699,6 +770,10 @@ func (c Client) newRequest(ctx context.Context, method string, metadata requestM
 		isVirtualHost, metadata.queryValues)
 	if err != nil {
 		return nil, err
+	}
+
+	if c.httpTrace != nil {
+		ctx = httptrace.WithClientTrace(ctx, c.httpTrace)
 	}
 
 	// Initialize a new HTTP request for the method.
@@ -736,6 +811,14 @@ func (c Client) newRequest(ctx context.Context, method string, metadata requestM
 		if signerType.IsAnonymous() {
 			return nil, errInvalidArgument("Presigned URLs cannot be generated with anonymous credentials.")
 		}
+		if metadata.extraPresignHeader != nil {
+			if signerType.IsV2() {
+				return nil, errInvalidArgument("Extra signed headers for Presign with Signature V2 is not supported.")
+			}
+			for k, v := range metadata.extraPresignHeader {
+				req.Header.Set(k, v[0])
+			}
+		}
 		if signerType.IsV2() {
 			// Presign URL with signature v2.
 			req = signer.PreSignV2(*req, accessKeyID, secretAccessKey, metadata.expires, isVirtualHost)
@@ -761,7 +844,7 @@ func (c Client) newRequest(ctx context.Context, method string, metadata requestM
 	if metadata.contentLength == 0 {
 		req.Body = nil
 	} else {
-		req.Body = ioutil.NopCloser(metadata.contentBody)
+		req.Body = io.NopCloser(metadata.contentBody)
 	}
 
 	// Set incoming content-length.
@@ -785,22 +868,31 @@ func (c Client) newRequest(ctx context.Context, method string, metadata requestM
 	case signerType.IsV2():
 		// Add signature version '2' authorization header.
 		req = signer.SignV2(*req, accessKeyID, secretAccessKey, isVirtualHost)
-	case metadata.objectName != "" && metadata.queryValues == nil && method == http.MethodPut && metadata.customHeader.Get("X-Amz-Copy-Source") == "" && !c.secure:
-		// Streaming signature is used by default for a PUT object request. Additionally we also
-		// look if the initialized client is secure, if yes then we don't need to perform
-		// streaming signature.
+	case metadata.streamSha256 && !c.secure:
+		if len(metadata.trailer) > 0 {
+			req.Trailer = metadata.trailer
+		}
+		// Streaming signature is used by default for a PUT object request.
+		// Additionally, we also look if the initialized client is secure,
+		// if yes then we don't need to perform streaming signature.
 		req = signer.StreamingSignV4(req, accessKeyID,
-			secretAccessKey, sessionToken, location, metadata.contentLength, time.Now().UTC())
+			secretAccessKey, sessionToken, location, metadata.contentLength, time.Now().UTC(), c.sha256Hasher())
 	default:
 		// Set sha256 sum for signature calculation only with signature version '4'.
 		shaHeader := unsignedPayload
 		if metadata.contentSHA256Hex != "" {
 			shaHeader = metadata.contentSHA256Hex
+			if len(metadata.trailer) > 0 {
+				// Sanity check, we should not end up here if upstream is sane.
+				return nil, errors.New("internal error: contentSHA256Hex with trailer not supported")
+			}
+		} else if len(metadata.trailer) > 0 {
+			shaHeader = unsignedPayloadTrailer
 		}
 		req.Header.Set("X-Amz-Content-Sha256", shaHeader)
 
 		// Add signature version '4' authorization header.
-		req = signer.SignV4(*req, accessKeyID, secretAccessKey, sessionToken, location)
+		req = signer.SignV4Trailer(*req, accessKeyID, secretAccessKey, sessionToken, location, metadata.trailer)
 	}
 
 	// Return request.
@@ -808,7 +900,7 @@ func (c Client) newRequest(ctx context.Context, method string, metadata requestM
 }
 
 // set User agent.
-func (c Client) setUserAgent(req *http.Request) {
+func (c *Client) setUserAgent(req *http.Request) {
 	req.Header.Set("User-Agent", libraryUserAgent)
 	if c.appInfo.appName != "" && c.appInfo.appVersion != "" {
 		req.Header.Set("User-Agent", libraryUserAgent+" "+c.appInfo.appName+"/"+c.appInfo.appVersion)
@@ -816,7 +908,7 @@ func (c Client) setUserAgent(req *http.Request) {
 }
 
 // makeTargetURL make a new target url.
-func (c Client) makeTargetURL(bucketName, objectName, bucketLocation string, isVirtualHostStyle bool, queryValues url.Values) (*url.URL, error) {
+func (c *Client) makeTargetURL(bucketName, objectName, bucketLocation string, isVirtualHostStyle bool, queryValues url.Values) (*url.URL, error) {
 	host := c.endpointURL.Host
 	// For Amazon S3 endpoint, try to fetch location based endpoint.
 	if s3utils.IsAmazonEndpoint(*c.endpointURL) {
@@ -831,8 +923,8 @@ func (c Client) makeTargetURL(bucketName, objectName, bucketLocation string, isV
 			// http://docs.aws.amazon.com/AmazonS3/latest/dev/transfer-acceleration.html
 			host = c.s3AccelerateEndpoint
 		} else {
-			// Do not change the host if the endpoint URL is a FIPS S3 endpoint.
-			if !s3utils.IsAmazonFIPSEndpoint(*c.endpointURL) {
+			// Do not change the host if the endpoint URL is a FIPS S3 endpoint or a S3 PrivateLink interface endpoint
+			if !s3utils.IsAmazonFIPSEndpoint(*c.endpointURL) && !s3utils.IsAmazonPrivateLinkEndpoint(*c.endpointURL) {
 				// Fetch new host based on the bucket location.
 				host = getS3Endpoint(bucketLocation)
 			}
@@ -848,10 +940,14 @@ func (c Client) makeTargetURL(bucketName, objectName, bucketLocation string, isV
 	if h, p, err := net.SplitHostPort(host); err == nil {
 		if scheme == "http" && p == "80" || scheme == "https" && p == "443" {
 			host = h
+			if ip := net.ParseIP(h); ip != nil && ip.To4() == nil {
+				host = "[" + h + "]"
+			}
 		}
 	}
 
 	urlStr := scheme + "://" + host + "/"
+
 	// Make URL only if bucketName is available, otherwise use the
 	// endpoint URL.
 	if bucketName != "" {
@@ -861,13 +957,13 @@ func (c Client) makeTargetURL(bucketName, objectName, bucketLocation string, isV
 		if isVirtualHostStyle {
 			urlStr = scheme + "://" + bucketName + "." + host + "/"
 			if objectName != "" {
-				urlStr = urlStr + s3utils.EncodePath(objectName)
+				urlStr += s3utils.EncodePath(objectName)
 			}
 		} else {
 			// If not fall back to using path style.
 			urlStr = urlStr + bucketName + "/"
 			if objectName != "" {
-				urlStr = urlStr + s3utils.EncodePath(objectName)
+				urlStr += s3utils.EncodePath(objectName)
 			}
 		}
 	}

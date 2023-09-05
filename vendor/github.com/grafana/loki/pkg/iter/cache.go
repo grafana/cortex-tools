@@ -53,7 +53,7 @@ func (it *cachedIterator) consumeWrapped() bool {
 		return false
 	}
 	// we're caching entries
-	it.cache = append(it.cache, entryWithLabels{entry: it.Wrapped().Entry(), labels: it.Wrapped().Labels()})
+	it.cache = append(it.cache, entryWithLabels{Entry: it.Wrapped().Entry(), labels: it.Wrapped().Labels(), streamHash: it.Wrapped().StreamHash()})
 	it.curr++
 	return true
 }
@@ -77,7 +77,7 @@ func (it *cachedIterator) Entry() logproto.Entry {
 		return logproto.Entry{}
 	}
 
-	return it.cache[it.curr].entry
+	return it.cache[it.curr].Entry
 }
 
 func (it *cachedIterator) Labels() string {
@@ -85,6 +85,13 @@ func (it *cachedIterator) Labels() string {
 		return ""
 	}
 	return it.cache[it.curr].labels
+}
+
+func (it *cachedIterator) StreamHash() uint64 {
+	if len(it.cache) == 0 || it.curr < 0 || it.curr >= len(it.cache) {
+		return 0
+	}
+	return it.cache[it.curr].streamHash
 }
 
 func (it *cachedIterator) Error() error { return it.iterErr }
@@ -111,7 +118,7 @@ type cachedSampleIterator struct {
 	iterErr  error
 }
 
-// newSampleCachedIterator creates an iterator that cache iteration result and can be iterated again
+// NewCachedSampleIterator creates an iterator that cache iteration result and can be iterated again
 // after closing it without re-using the underlaying iterator `it`.
 func NewCachedSampleIterator(it SampleIterator, cap int) CacheSampleIterator {
 	c := &cachedSampleIterator{
@@ -143,7 +150,7 @@ func (it *cachedSampleIterator) consumeWrapped() bool {
 		return false
 	}
 	// we're caching entries
-	it.cache = append(it.cache, sampleWithLabels{Sample: it.Wrapped().Sample(), labels: it.Wrapped().Labels()})
+	it.cache = append(it.cache, sampleWithLabels{Sample: it.Wrapped().Sample(), labels: it.Wrapped().Labels(), streamHash: it.Wrapped().StreamHash()})
 	it.curr++
 	return true
 }
@@ -174,6 +181,13 @@ func (it *cachedSampleIterator) Labels() string {
 		return ""
 	}
 	return it.cache[it.curr].labels
+}
+
+func (it *cachedSampleIterator) StreamHash() uint64 {
+	if len(it.cache) == 0 || it.curr < 0 || it.curr >= len(it.cache) {
+		return 0
+	}
+	return it.cache[it.curr].streamHash
 }
 
 func (it *cachedSampleIterator) Error() error { return it.iterErr }
