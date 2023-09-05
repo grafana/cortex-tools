@@ -264,30 +264,8 @@ require (
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
 
-// Cortex Overrides
-replace git.apache.org/thrift.git => github.com/apache/thrift v0.0.0-20180902110319-2566ecd5d999
-
-replace github.com/aws/aws-sdk-go => github.com/aws/aws-sdk-go v1.40.37
-
-//replace github.com/thanos-io/thanos v0.22.0 => github.com/thanos-io/thanos v0.19.1-0.20210923155558-c15594a03c45
-
-// Thanos Override
-replace github.com/efficientgo/tools/core => github.com/efficientgo/tools/core v0.0.0-20210731122119-5d4a0645ce9a
-
-// Keeping this same as Cortex to avoid dependency issues.
-//replace k8s.io/client-go => k8s.io/client-go v0.20.4
-
-//replace k8s.io/api => k8s.io/api v0.20.4
-
-// Use fork of gocql that has gokit logs and Prometheus metrics.
+// Use fork of gocql that has gokit logs and Prometheus metrics - required
 replace github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
-
-// Using a 3rd-party branch for custom dialer - see https://github.com/bradfitz/gomemcache/pull/86
-replace github.com/bradfitz/gomemcache => github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab
-
-// Required for Alertmanager
-
-replace github.com/hashicorp/consul => github.com/hashicorp/consul v1.8.1
 
 replace github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 
@@ -295,13 +273,5 @@ replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.
 
 replace google.golang.org/grpc => google.golang.org/grpc v1.53.0
 
-//replace github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20230727115635-d0c43443ecda
-
+// Loki depends on this version
 replace github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
-
-//
-//replace go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp => go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.37.0
-//replace go.opentelemetry.io/otel/metric => go.opentelemetry.io/otel/metric v0.32.0
-//replace go.opentelemetry.io/otel/trace => go.opentelemetry.io/otel/trace v1.11.2
-
-//replace github.com/cortexproject/cortex => github.com/cortexproject/cortex v1.14.1
