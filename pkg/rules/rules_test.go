@@ -5,7 +5,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/rulefmt"
 	"github.com/stretchr/testify/require"
-	yaml "gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v3"
 	"gotest.tools/assert"
 
 	"github.com/grafana/cortex-tools/pkg/rules/rwrulefmt"
@@ -275,6 +275,13 @@ func TestLintExpressions(t *testing.T) {
 			count: 0, modified: 0,
 			logql: true,
 			err:   "parse error at line 1, col 31: syntax error: unexpected %, expecting } or ,",
+		},
+		{
+			name:     "logql vector expression",
+			expr:     `count(count_over_time({foo="bar"}[1m])) or vector(1)`,
+			expected: `(count(count_over_time({foo="bar"}[1m])) or vector(1.000000))`,
+			count:    1, modified: 1,
+			logql: true,
 		},
 	}
 
