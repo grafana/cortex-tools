@@ -1,6 +1,6 @@
 module github.com/grafana/cortex-tools
 
-go 1.18
+go 1.21
 
 require (
 	github.com/alecthomas/chroma v0.7.0
