@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"net/http"
 	"net/url"
@@ -18,8 +17,8 @@ import (
 
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/value"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage/remote"
@@ -385,10 +384,7 @@ func (c *RemoteReadCommand) export(k *kingpin.ParseContext) error {
 	}
 
 	if c.tsdbPath == "" {
-		c.tsdbPath, err = ioutil.TempDir("", "cortextool-tsdb")
-		if err != nil {
-			return err
-		}
+		c.tsdbPath = os.TempDir()
 		log.Infof("Created TSDB in path '%s'", c.tsdbPath)
 	} else {
 		if _, err := os.Stat(c.tsdbPath); err != nil && os.IsNotExist(err) {

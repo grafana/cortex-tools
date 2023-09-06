@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"time"
 
-	"io/ioutil"
 	"net/url"
 
 	"github.com/pkg/errors"
@@ -109,7 +109,7 @@ func (a *AlertmanagerCommand) getConfig(k *kingpin.ParseContext) error {
 }
 
 func (a *AlertmanagerCommand) loadConfig(k *kingpin.ParseContext) error {
-	content, err := ioutil.ReadFile(a.AlertmanagerConfigFile)
+	content, err := os.ReadFile(a.AlertmanagerConfigFile)
 	if err != nil {
 		return errors.Wrap(err, "unable to load config file: "+a.AlertmanagerConfigFile)
 	}
@@ -122,7 +122,7 @@ func (a *AlertmanagerCommand) loadConfig(k *kingpin.ParseContext) error {
 
 	templates := map[string]string{}
 	for _, f := range a.TemplateFiles {
-		tmpl, err := ioutil.ReadFile(f)
+		tmpl, err := os.ReadFile(f)
 		if err != nil {
 			return errors.Wrap(err, "unable to load template file: "+f)
 		}
@@ -258,7 +258,7 @@ func (a *AlertCommand) runVerifyQuery(ctx context.Context, query string) (int, e
 		return 0, err
 	}
 
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return 0, err
 	}

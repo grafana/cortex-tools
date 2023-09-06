@@ -9,30 +9,34 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
         with:
-          version: v1.31
+          go-version: '1.21'
+          cache: false
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3.7.0
+        with:
+          version: v1.54.2
   unit_tests:
     name: Unit-Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Go 1.16
-        uses: actions/setup-go@v1
+      - uses: actions/checkout@v3
+      - name: Set up Go 1.21
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.16
+          go-version: 1.21
       - name: Unit Tests
         run: make test
   build:
     name: Build Binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Go 1.16
-        uses: actions/setup-go@v1
+      - uses: actions/checkout@v3
+      - name: Set up Go 1.21
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.16
+          go-version: 1.21
       - name: Build All
         run: make all

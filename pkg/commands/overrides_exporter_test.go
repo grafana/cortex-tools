@@ -36,10 +36,6 @@ cortex_overrides{limit_name="max_local_series_per_user",user="123"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="159"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="456"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="789"} 0
-cortex_overrides{limit_name="max_samples_per_query",user="123"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="159"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="456"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="789"} 1e+06
 cortex_overrides{limit_name="max_series_per_query",user="123"} 100000
 cortex_overrides{limit_name="max_series_per_query",user="159"} 100000
 cortex_overrides{limit_name="max_series_per_query",user="456"} 100000
@@ -72,10 +68,6 @@ cortex_overrides{limit_name="max_local_series_per_user",user="123"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="159"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="456"} 0
 cortex_overrides{limit_name="max_local_series_per_user",user="789"} 0
-cortex_overrides{limit_name="max_samples_per_query",user="123"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="159"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="456"} 1e+06
-cortex_overrides{limit_name="max_samples_per_query",user="789"} 1e+06
 cortex_overrides{limit_name="max_series_per_query",user="123"} 100000
 cortex_overrides{limit_name="max_series_per_query",user="159"} 100000
 cortex_overrides{limit_name="max_series_per_query",user="456"} 100000
@@ -112,11 +104,6 @@ cortex_overrides_presets{limit_name="max_local_series_per_user",preset="medium_u
 cortex_overrides_presets{limit_name="max_local_series_per_user",preset="mega_user"} 0
 cortex_overrides_presets{limit_name="max_local_series_per_user",preset="small_user"} 0
 cortex_overrides_presets{limit_name="max_local_series_per_user",preset="super_user"} 0
-cortex_overrides_presets{limit_name="max_samples_per_query",preset="big_user"} 1e+06
-cortex_overrides_presets{limit_name="max_samples_per_query",preset="medium_user"} 1e+06
-cortex_overrides_presets{limit_name="max_samples_per_query",preset="mega_user"} 1e+06
-cortex_overrides_presets{limit_name="max_samples_per_query",preset="small_user"} 100000
-cortex_overrides_presets{limit_name="max_samples_per_query",preset="super_user"} 1e+06
 cortex_overrides_presets{limit_name="max_series_per_query",preset="big_user"} 100000
 cortex_overrides_presets{limit_name="max_series_per_query",preset="medium_user"} 100000
 cortex_overrides_presets{limit_name="max_series_per_query",preset="mega_user"} 100000
@@ -135,7 +122,7 @@ func TestOverridesExporterCommand(t *testing.T) {
 
 	count, err := testutil.GatherAndCount(o.registry, "cortex_overrides", "cortex_overrides_presets")
 	assert.NoError(t, err)
-	assert.Equal(t, 32, count)
+	assert.Equal(t, 28, count)
 	assert.NoError(t, testutil.GatherAndCompare(o.registry, bytes.NewReader([]byte(metricsOverrides)), "cortex_overrides", "cortex_overrides_presets"))
 
 	o.presetsFilePath = "testdata/presets.yaml"
@@ -144,6 +131,6 @@ func TestOverridesExporterCommand(t *testing.T) {
 
 	count, err = testutil.GatherAndCount(o.registry, "cortex_overrides", "cortex_overrides_presets")
 	assert.NoError(t, err)
-	assert.Equal(t, 72, count)
+	assert.Equal(t, 63, count)
 	assert.NoError(t, testutil.GatherAndCompare(o.registry, bytes.NewReader([]byte(metricsOverridesAndPresets)), "cortex_overrides", "cortex_overrides_presets"))
 }

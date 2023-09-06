@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -57,7 +57,7 @@ func (r *CortexClient) GetAlertmanagerConfig(ctx context.Context) (string, map[s
 	}
 
 	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", nil, err
 	}

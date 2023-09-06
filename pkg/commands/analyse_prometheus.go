@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"sort"
 	"time"
@@ -13,7 +12,7 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 
@@ -41,7 +40,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 
 	if _, err := os.Stat(cmd.grafanaMetricsFile); err == nil {
 		hasGrafanaMetrics = true
-		byt, err := ioutil.ReadFile(cmd.grafanaMetricsFile)
+		byt, err := os.ReadFile(cmd.grafanaMetricsFile)
 		if err != nil {
 			return err
 		}
@@ -53,7 +52,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 
 	if _, err := os.Stat(cmd.rulerMetricsFile); err == nil {
 		hasRulerMetrics = true
-		byt, err := ioutil.ReadFile(cmd.rulerMetricsFile)
+		byt, err := os.ReadFile(cmd.rulerMetricsFile)
 		if err != nil {
 			return err
 		}
@@ -228,7 +227,7 @@ func (cmd *PrometheusAnalyseCommand) run(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	if err := ioutil.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
+	if err := os.WriteFile(cmd.outputFile, out, os.FileMode(int(0666))); err != nil {
 		return err
 	}
 

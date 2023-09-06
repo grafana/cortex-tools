@@ -20,12 +20,11 @@ package minio
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"net/http"
 )
 
 // CopyObject - copy a source object into a new object
-func (c Client) CopyObject(ctx context.Context, dst CopyDestOptions, src CopySrcOptions) (UploadInfo, error) {
+func (c *Client) CopyObject(ctx context.Context, dst CopyDestOptions, src CopySrcOptions) (UploadInfo, error) {
 	if err := src.validate(); err != nil {
 		return UploadInfo{}, err
 	}
@@ -54,7 +53,7 @@ func (c Client) CopyObject(ctx context.Context, dst CopyDestOptions, src CopySrc
 
 	// Update the progress properly after successful copy.
 	if dst.Progress != nil {
-		io.Copy(ioutil.Discard, io.LimitReader(dst.Progress, dst.Size))
+		io.Copy(io.Discard, io.LimitReader(dst.Progress, dst.Size))
 	}
 
 	cpObjRes := copyObjectResult{}

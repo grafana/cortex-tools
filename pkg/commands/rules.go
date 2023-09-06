@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,7 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/prometheus/pkg/rulefmt"
+	"github.com/prometheus/prometheus/model/rulefmt"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 	yamlv3 "gopkg.in/yaml.v3"
@@ -775,7 +774,7 @@ func save(nss map[string]rules.RuleNamespace, i bool) error {
 			filepath = filepath + ".result"
 		}
 
-		if err := ioutil.WriteFile(filepath, payload, 0644); err != nil {
+		if err := os.WriteFile(filepath, payload, 0644); err != nil {
 			return err
 		}
 	}

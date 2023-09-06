@@ -9,8 +9,8 @@ import (
 	"time"
 
 	ingester_client "github.com/cortexproject/cortex/pkg/ingester/client"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/kv/codec"
 	"github.com/grafana/dskit/kv/memberlist"
 	"github.com/grafana/dskit/ring"
@@ -55,7 +55,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 		workload: workload,
 	}
 	reg := prometheus.DefaultRegisterer
-	cfg.MemberlistKV.MetricsRegisterer = reg
+	//cfg.MemberlistKV.MetricsRegisterer = reg
 	cfg.MemberlistKV.Codecs = []codec.Codec{
 		ring.GetCodec(),
 	}
@@ -72,7 +72,7 @@ func NewRingChecker(id string, instanceName string, cfg RingCheckConfig, workloa
 	cfg.RingConfig.KVStore.MemberlistKV = r.MemberlistKV.GetMemberlistKV
 
 	var err error
-	r.Ring, err = ring.New(cfg.RingConfig, "ingester", ring.IngesterRingKey, logger, reg)
+	r.Ring, err = ring.New(cfg.RingConfig, "ingester", "ring", logger, reg)
 	if err != nil {
 		return nil, err
 	}

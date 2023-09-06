@@ -14,7 +14,6 @@ This repo contains tools used for interacting with [Cortex](https://github.com/c
 * [benchtool](docs/benchtool.md): A powerful YAML driven tool for benchmarking
   Cortex write and query API.
 * [cortextool](#cortextool): Interacts with user-facing Cortex APIs and backend storage components.
-* [chunktool](#chunktool): Interacts with chunks stored and indexed in Cortex storage backends.
 * [logtool](#logtool): Tool which parses Cortex query-frontend logs and formats them for easy analysis.
 * [e2ealerting](docs/e2ealerting.md): Tool that helps measure how long an alert takes from scrape of sample to Alertmanager notification delivery.
 
@@ -385,25 +384,6 @@ This command accepts Prometheus rule YAML files as input and extracts Prometheus
 ```shell
 cortextool analyse rule-file ./rule_file_one.yaml ./rule_file_two.yaml ...
 ```
-
-## chunktool
-
-This repo also contains the `chunktool`. A client meant to interact with chunks stored and indexed in cortex backends.
-
-##### Chunk Delete
-
-The delete command currently cleans all index entries pointing to chunks in the specified index. Only bigtable and the v10 schema are currently fully supported. This will not delete the entire index entry, only the corresponding chunk entries within the index row.
-
-##### Chunk Migrate
-
-The migrate command helps with migrating chunks across cortex clusters. It also takes care of setting right index in the new cluster as per the specified schema config.
-
-As of now it only supports `Bigtable` or `GCS` as a source to read chunks from for migration.  For writing it supports all the storages that Cortex supports.
-More details about it [here](./pkg/chunk/migrate/README.md)
-
-##### Chunk Validate/Clean-Index
-
-The `chunk validate-index` and `chunk clean-index` command allows users to scan their index and chunk backends for invalid entries. The `validate-index` command will find invalid entries and ouput them to a CSV file. The `clean-index` command will take that CSV file as input and delete the invalid entries.
 
 ## logtool
 

@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,16 +26,17 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"github.com/opentracing-contrib/go-stdlib/nethttp"
-	"github.com/opentracing/opentracing-go"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/sigv4"
 	"github.com/prometheus/common/version"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/storage/remote/azuread"
 )
 
 const maxErrMsgLen = 1024
@@ -81,7 +81,7 @@ func init() {
 // Client allows reading and writing from/to a remote HTTP endpoint.
 type Client struct {
 	remoteName string // Used to differentiate clients in metrics.
-	url        *config_util.URL
+	urlString  string // url.String()
 	Client     *http.Client
 	timeout    time.Duration
 
@@ -98,6 +98,7 @@ type ClientConfig struct {
 	Timeout          model.Duration
 	HTTPClientConfig config_util.HTTPClientConfig
 	SigV4Config      *sigv4.SigV4Config
+	AzureADConfig    *azuread.AzureADConfig
 	Headers          map[string]string
 	RetryOnRateLimit bool
 }
@@ -119,13 +120,11 @@ func NewReadClient(name string, conf *ClientConfig) (ReadClient, error) {
 	if len(conf.Headers) > 0 {
 		t = newInjectHeadersRoundTripper(conf.Headers, t)
 	}
-	httpClient.Transport = &nethttp.Transport{
-		RoundTripper: t,
-	}
+	httpClient.Transport = otelhttp.NewTransport(t)
 
 	return &Client{
 		remoteName:          name,
-		url:                 conf.URL,
+		urlString:           conf.URL.String(),
 		Client:              httpClient,
 		timeout:             time.Duration(conf.Timeout),
 		readQueries:         remoteReadQueries.WithLabelValues(name, conf.URL.String()),
@@ -149,17 +148,22 @@ func NewWriteClient(name string, conf *ClientConfig) (WriteClient, error) {
 		}
 	}
 
+	if conf.AzureADConfig != nil {
+		t, err = azuread.NewAzureADRoundTripper(conf.AzureADConfig, httpClient.Transport)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if len(conf.Headers) > 0 {
 		t = newInjectHeadersRoundTripper(conf.Headers, t)
 	}
 
-	httpClient.Transport = &nethttp.Transport{
-		RoundTripper: t,
-	}
+	httpClient.Transport = otelhttp.NewTransport(t)
 
 	return &Client{
 		remoteName:       name,
-		url:              conf.URL,
+		urlString:        conf.URL.String(),
 		Client:           httpClient,
 		retryOnRateLimit: conf.RetryOnRateLimit,
 		timeout:          time.Duration(conf.Timeout),
@@ -192,7 +196,7 @@ type RecoverableError struct {
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshalled
 // and encoded bytes from codec.go.
 func (c *Client) Store(ctx context.Context, req []byte) error {
-	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(req))
+	httpReq, err := http.NewRequest("POST", c.urlString, bytes.NewReader(req))
 	if err != nil {
 		// Errors from NewRequest are from unparsable URLs, so are not
 		// recoverable.
@@ -206,27 +210,17 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	httpReq = httpReq.WithContext(ctx)
+	ctx, span := otel.Tracer("").Start(ctx, "Remote Store", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
 
-	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
-		var ht *nethttp.Tracer
-		httpReq, ht = nethttp.TraceRequest(
-			parentSpan.Tracer(),
-			httpReq,
-			nethttp.OperationName("Remote Store"),
-			nethttp.ClientTrace(false),
-		)
-		defer ht.Finish()
-	}
-
-	httpResp, err := c.Client.Do(httpReq)
+	httpResp, err := c.Client.Do(httpReq.WithContext(ctx))
 	if err != nil {
 		// Errors from Client.Do are from (for example) network errors, so are
 		// recoverable.
 		return RecoverableError{err, defaultBackoff}
 	}
 	defer func() {
-		io.Copy(ioutil.Discard, httpResp.Body)
+		io.Copy(io.Discard, httpResp.Body)
 		httpResp.Body.Close()
 	}()
 
@@ -236,7 +230,7 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 		if scanner.Scan() {
 			line = scanner.Text()
 		}
-		err = errors.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
+		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
 	}
 	if httpResp.StatusCode/100 == 5 {
 		return RecoverableError{err, defaultBackoff}
@@ -270,7 +264,7 @@ func (c Client) Name() string {
 
 // Endpoint is the remote read or write endpoint.
 func (c Client) Endpoint() string {
-	return c.url.String()
+	return c.urlString
 }
 
 // Read reads from a remote endpoint.
@@ -287,13 +281,13 @@ func (c *Client) Read(ctx context.Context, query *prompb.Query) (*prompb.QueryRe
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to marshal read request")
+		return nil, fmt.Errorf("unable to marshal read request: %w", err)
 	}
 
 	compressed := snappy.Encode(nil, data)
-	httpReq, err := http.NewRequest("POST", c.url.String(), bytes.NewReader(compressed))
+	httpReq, err := http.NewRequest("POST", c.urlString, bytes.NewReader(compressed))
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create request")
+		return nil, fmt.Errorf("unable to create request: %w", err)
 	}
 	httpReq.Header.Add("Content-Encoding", "snappy")
 	httpReq.Header.Add("Accept-Encoding", "snappy")
@@ -304,53 +298,43 @@ func (c *Client) Read(ctx context.Context, query *prompb.Query) (*prompb.QueryRe
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	httpReq = httpReq.WithContext(ctx)
-
-	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
-		var ht *nethttp.Tracer
-		httpReq, ht = nethttp.TraceRequest(
-			parentSpan.Tracer(),
-			httpReq,
-			nethttp.OperationName("Remote Read"),
-			nethttp.ClientTrace(false),
-		)
-		defer ht.Finish()
-	}
+	ctx, span := otel.Tracer("").Start(ctx, "Remote Read", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
 
 	start := time.Now()
-	httpResp, err := c.Client.Do(httpReq)
+	httpResp, err := c.Client.Do(httpReq.WithContext(ctx))
 	if err != nil {
-		return nil, errors.Wrap(err, "error sending request")
+		return nil, fmt.Errorf("error sending request: %w", err)
 	}
 	defer func() {
-		io.Copy(ioutil.Discard, httpResp.Body)
+		io.Copy(io.Discard, httpResp.Body)
 		httpResp.Body.Close()
 	}()
 	c.readQueriesDuration.Observe(time.Since(start).Seconds())
 	c.readQueriesTotal.WithLabelValues(strconv.Itoa(httpResp.StatusCode)).Inc()
 
-	compressed, err = ioutil.ReadAll(httpResp.Body)
+	compressed, err = io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("error reading response. HTTP status code: %s", httpResp.Status))
+		return nil, fmt.Errorf("error reading response. HTTP status code: %s: %w", httpResp.Status, err)
 	}
 
 	if httpResp.StatusCode/100 != 2 {
-		return nil, errors.Errorf("remote server %s returned HTTP status %s: %s", c.url.String(), httpResp.Status, strings.TrimSpace(string(compressed)))
+		return nil, fmt.Errorf("remote server %s returned HTTP status %s: %s", c.urlString, httpResp.Status, strings.TrimSpace(string(compressed)))
 	}
 
 	uncompressed, err := snappy.Decode(nil, compressed)
 	if err != nil {
-		return nil, errors.Wrap(err, "error reading response")
+		return nil, fmt.Errorf("error reading response: %w", err)
 	}
 
 	var resp prompb.ReadResponse
 	err = proto.Unmarshal(uncompressed, &resp)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to unmarshal response body")
+		return nil, fmt.Errorf("unable to unmarshal response body: %w", err)
 	}
 
 	if len(resp.Results) != len(req.Queries) {
-		return nil, errors.Errorf("responses: want %d, got %d", len(req.Queries), len(resp.Results))
+		return nil, fmt.Errorf("responses: want %d, got %d", len(req.Queries), len(resp.Results))
 	}
 
 	return resp.Results[0], nil

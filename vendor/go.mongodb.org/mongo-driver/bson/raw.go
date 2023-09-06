@@ -15,18 +15,26 @@ import (
 
 // ErrNilReader indicates that an operation was attempted on a nil bson.Reader.
 var ErrNilReader = errors.New("nil reader")
-var errValidateDone = errors.New("validation loop complete")
 
-// Raw is a wrapper around a byte slice. It will interpret the slice as a
-// BSON document. This type is a wrapper around a bsoncore.Document. Errors returned from the
-// methods on this type and associated types come from the bsoncore package.
+// Raw is a raw encoded BSON document. It can be used to delay BSON document decoding or precompute
+// a BSON encoded document.
+//
+// A Raw must be a full BSON document. Use the RawValue type for individual BSON values.
 type Raw []byte
 
-// NewFromIOReader reads in a document from the given io.Reader and constructs a Raw from
-// it.
-func NewFromIOReader(r io.Reader) (Raw, error) {
+// ReadDocument reads a BSON document from the io.Reader and returns it as a bson.Raw. If the
+// reader contains multiple BSON documents, only the first document is read.
+func ReadDocument(r io.Reader) (Raw, error) {
 	doc, err := bsoncore.NewDocumentFromReader(r)
 	return Raw(doc), err
+}
+
+// NewFromIOReader reads a BSON document from the io.Reader and returns it as a bson.Raw. If the
+// reader contains multiple BSON documents, only the first document is read.
+//
+// Deprecated: Use ReadDocument instead.
+func NewFromIOReader(r io.Reader) (Raw, error) {
+	return ReadDocument(r)
 }
 
 // Validate validates the document. This method only validates the first document in
@@ -82,11 +90,5 @@ func (r Raw) IndexErr(index uint) (RawElement, error) {
 	return RawElement(elem), err
 }
 
-// String implements the fmt.Stringer interface.
+// String returns the BSON document encoded as Extended JSON.
 func (r Raw) String() string { return bsoncore.Document(r).String() }
-
-// readi32 is a helper function for reading an int32 from slice of bytes.
-func readi32(b []byte) int32 {
-	_ = b[3] // bounds check hint to compiler; see golang.org/issue/14808
-	return int32(b[0]) | int32(b[1])<<8 | int32(b[2])<<16 | int32(b[3])<<24
-}

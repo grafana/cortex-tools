@@ -2,17 +2,17 @@ package commands
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"sort"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/grafana/cortex-tools/pkg/bench"
 	"github.com/pkg/errors"
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"gopkg.in/yaml.v3"
@@ -54,11 +54,7 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 	}
 
 	if f.Cfg.BlockDir == "" {
-		var err error
-		f.Cfg.BlockDir, err = ioutil.TempDir("", "mockdata")
-		if err != nil {
-			return errors.Wrap(err, "failed to create tmp dir")
-		}
+		f.Cfg.BlockDir = os.TempDir()
 	}
 
 	seriesSet, totalSeriesTypeMap := bench.SeriesDescToSeries(f.Series)
@@ -105,7 +101,7 @@ func (f *BlockGenCommand) run(k *kingpin.ParseContext) error {
 
 		app := w.Appender(ctx)
 		for _, s := range timeSeries {
-			var ref uint64
+			var ref storage.SeriesRef
 
 			labels := prompbLabelsToLabelsLabels(s.Labels)
 			sort.Slice(labels, func(i, j int) bool {

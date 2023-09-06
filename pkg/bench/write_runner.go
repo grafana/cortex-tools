@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
@@ -113,9 +113,12 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 			return nil, err
 		}
 
-		var proxyURL *url.URL
+		var proxyURL config.URL
 		if w.cfg.ProxyURL != "" {
-			proxyURL, err = url.Parse(w.cfg.ProxyURL)
+			configURL, err := url.Parse(w.cfg.ProxyURL)
+			proxyURL = config.URL{
+				URL: configURL,
+			}
 			if err != nil {
 				return nil, errors.Wrap(err, "invalid proxy url")
 			}
@@ -130,8 +133,8 @@ func (w *WriteBenchmarkRunner) getRandomWriteClient() (*writeClient, error) {
 					Username: w.cfg.BasicAuthUsername,
 					Password: config.Secret(w.cfg.BasicAuthPasword),
 				},
-				ProxyURL: config.URL{
-					URL: proxyURL,
+				ProxyConfig: config.ProxyConfig{
+					ProxyURL: proxyURL,
 				},
 			},
 		}, w.logger, w.requestDuration)

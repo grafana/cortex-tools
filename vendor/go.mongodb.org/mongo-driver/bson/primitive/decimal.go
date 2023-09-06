@@ -133,11 +133,9 @@ Loop:
 }
 
 // BigInt returns significand as big.Int and exponent, bi * 10 ^ exp.
-func (d Decimal128) BigInt() (bi *big.Int, exp int, err error) {
+func (d Decimal128) BigInt() (*big.Int, int, error) {
 	high, low := d.GetBytes()
-	var posSign bool // positive sign
-
-	posSign = high>>63&1 == 0
+	posSign := high>>63&1 == 0 // positive sign
 
 	switch high >> 58 & (1<<5 - 1) {
 	case 0x1F:
@@ -149,6 +147,7 @@ func (d Decimal128) BigInt() (bi *big.Int, exp int, err error) {
 		return nil, 0, ErrParseNegInf
 	}
 
+	var exp int
 	if high>>61&3 == 3 {
 		// Bits: 1*sign 2*ignored 14*exponent 111*significand.
 		// Implicit 0b100 prefix in significand.
@@ -171,7 +170,7 @@ func (d Decimal128) BigInt() (bi *big.Int, exp int, err error) {
 		return new(big.Int), 0, nil
 	}
 
-	bi = big.NewInt(0)
+	bi := big.NewInt(0)
 	const host32bit = ^uint(0)>>32 == 0
 	if host32bit {
 		bi.SetBits([]big.Word{big.Word(low), big.Word(low >> 32), big.Word(high), big.Word(high >> 32)})
@@ -182,7 +181,7 @@ func (d Decimal128) BigInt() (bi *big.Int, exp int, err error) {
 	if !posSign {
 		return bi.Neg(bi), exp, nil
 	}
-	return
+	return bi, exp, nil
 }
 
 // IsNaN returns whether d is NaN.
@@ -192,10 +191,9 @@ func (d Decimal128) IsNaN() bool {
 
 // IsInf returns:
 //
-//   +1 d == Infinity
-//    0 other case
-//   -1 d == -Infinity
-//
+//	+1 d == Infinity
+//	 0 other case
+//	-1 d == -Infinity
 func (d Decimal128) IsInf() int {
 	if d.h>>58&(1<<5-1) != 0x1E {
 		return 0
@@ -330,6 +328,7 @@ func ParseDecimal128(s string) (Decimal128, error) {
 		return dErr(s)
 	}
 
+	// Parse the significand (i.e. the non-exponent part) as a big.Int.
 	bi, ok := new(big.Int).SetString(intPart+decPart, 10)
 	if !ok {
 		return dErr(s)
@@ -361,6 +360,19 @@ func ParseDecimal128FromBigInt(bi *big.Int, exp int) (Decimal128, bool) {
 
 	q := new(big.Int)
 	r := new(big.Int)
+
+	// If the significand is zero, the logical value will always be zero, independent of the
+	// exponent. However, the loops for handling out-of-range exponent values below may be extremely
+	// slow for zero values because the significand never changes. Limit the exponent value to the
+	// supported range here to prevent entering the loops below.
+	if bi.Cmp(zero) == 0 {
+		if exp > MaxDecimal128Exp {
+			exp = MaxDecimal128Exp
+		}
+		if exp < MinDecimal128Exp {
+			exp = MinDecimal128Exp
+		}
+	}
 
 	for bigIntCmpAbs(bi, maxS) == 1 {
 		bi, _ = q.QuoRem(bi, ten, r)

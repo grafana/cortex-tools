@@ -8,38 +8,27 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/gogo/protobuf/proto"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/grafana/dskit/flagext"
+	dsmath "github.com/grafana/dskit/internal/math"
+	"github.com/grafana/dskit/internal/slices"
 	"github.com/grafana/dskit/kv"
 	shardUtil "github.com/grafana/dskit/ring/shard"
-	"github.com/grafana/dskit/ring/util"
 	"github.com/grafana/dskit/services"
-
-	"github.com/grafana/dskit/flagext"
-	dsmath "github.com/grafana/dskit/math"
 )
 
 const (
 	unhealthy = "Unhealthy"
-
-	// IngesterRingKey is the key under which we store the ingesters ring in the KVStore.
-	IngesterRingKey = "ring"
-
-	// RulerRingKey is the key under which we store the rulers ring in the KVStore.
-	RulerRingKey = "ring"
-
-	// DistributorRingKey is the key under which we store the distributors ring in the KVStore.
-	DistributorRingKey = "distributor"
-
-	// CompactorRingKey is the key under which we store the compactors ring in the KVStore.
-	CompactorRingKey = "compactor"
 
 	// GetBufferSize is the suggested size of buffers passed to Ring.Get(). It's based on
 	// a typical replication factor 3, plus extra room for a JOINING + LEAVING instance.
@@ -48,7 +37,6 @@ const (
 
 // ReadRing represents the read interface to the ring.
 type ReadRing interface {
-
 	// Get returns n (or more) instances which form the replicas for the given key.
 	// bufDescs, bufHosts and bufZones are slices to be overwritten for the return value
 	// to avoid memory allocation; can be nil, or created with ring.MakeBuffersForGet().
@@ -133,10 +121,10 @@ var (
 // Config for a Ring
 type Config struct {
 	KVStore              kv.Config              `yaml:"kvstore"`
-	HeartbeatTimeout     time.Duration          `yaml:"heartbeat_timeout"`
+	HeartbeatTimeout     time.Duration          `yaml:"heartbeat_timeout" category:"advanced"`
 	ReplicationFactor    int                    `yaml:"replication_factor"`
 	ZoneAwarenessEnabled bool                   `yaml:"zone_awareness_enabled"`
-	ExcludedZones        flagext.StringSliceCSV `yaml:"excluded_zones"`
+	ExcludedZones        flagext.StringSliceCSV `yaml:"excluded_zones" category:"advanced"`
 
 	// Whether the shuffle-sharding subring cache is disabled. This option is set
 	// internally and never exposed to the user.
@@ -163,7 +151,7 @@ type instanceInfo struct {
 	Zone       string
 }
 
-// Ring holds the information about the members of the consistent hash ring.
+// Ring is a Service that maintains an in-memory copy of a ring and watches for changes.
 type Ring struct {
 	services.Service
 
@@ -177,8 +165,12 @@ type Ring struct {
 	ringTokens       []uint32
 	ringTokensByZone map[string][]uint32
 
+	// Oldest value of RegisteredTimestamp from all instances. If any instance had RegisteredTimestamp == 0,
+	// then this value will be 0.
+	oldestRegisteredTimestamp int64
+
 	// Maps a token with the information of the instance holding it. This map is immutable and
-	// cannot be chanced in place because it's shared "as is" between subrings (the only way to
+	// cannot be changed in place because it's shared "as is" between subrings (the only way to
 	// change it is to create a new one and replace it).
 	ringInstanceByToken map[uint32]instanceInfo
 
@@ -191,20 +183,26 @@ type Ring struct {
 
 	// Cache of shuffle-sharded subrings per identifier. Invalidated when topology changes.
 	// If set to nil, no caching is done (used by tests, and subrings).
-	shuffledSubringCache map[subringCacheKey]*Ring
+	shuffledSubringCache             map[subringCacheKey]*Ring
+	shuffledSubringWithLookbackCache map[subringCacheKey]cachedSubringWithLookback
 
-	memberOwnershipGaugeVec *prometheus.GaugeVec
 	numMembersGaugeVec      *prometheus.GaugeVec
 	totalTokensGauge        prometheus.Gauge
-	numTokensGaugeVec       *prometheus.GaugeVec
 	oldestTimestampGaugeVec *prometheus.GaugeVec
 
 	logger log.Logger
 }
 
 type subringCacheKey struct {
-	identifier string
-	shardSize  int
+	identifier     string
+	shardSize      int
+	lookbackPeriod time.Duration
+}
+
+type cachedSubringWithLookback struct {
+	subring                               *Ring
+	validForLookbackWindowsStartingAfter  int64 // if the lookback window is from T to S, validForLookbackWindowsStartingAfter is the earliest value of T this cache entry is valid for
+	validForLookbackWindowsStartingBefore int64 // if the lookback window is from T to S, validForLookbackWindowsStartingBefore is the latest value of T this cache entry is valid for
 }
 
 // New creates a new Ring. Being a service, Ring needs to be started to do anything.
@@ -230,35 +228,29 @@ func NewWithStoreClientAndStrategy(cfg Config, name, key string, store kv.Client
 	}
 
 	r := &Ring{
-		key:                  key,
-		cfg:                  cfg,
-		KVClient:             store,
-		strategy:             strategy,
-		ringDesc:             &Desc{},
-		shuffledSubringCache: map[subringCacheKey]*Ring{},
-		memberOwnershipGaugeVec: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
-			Name:        "ring_member_ownership_percent",
-			Help:        "The percent ownership of the ring by member",
-			ConstLabels: map[string]string{"name": name}},
-			[]string{"member"}),
+		key:                              key,
+		cfg:                              cfg,
+		KVClient:                         store,
+		strategy:                         strategy,
+		ringDesc:                         &Desc{},
+		shuffledSubringCache:             map[subringCacheKey]*Ring{},
+		shuffledSubringWithLookbackCache: map[subringCacheKey]cachedSubringWithLookback{},
 		numMembersGaugeVec: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name:        "ring_members",
 			Help:        "Number of members in the ring",
-			ConstLabels: map[string]string{"name": name}},
+			ConstLabels: map[string]string{"name": name},
+		},
 			[]string{"state"}),
 		totalTokensGauge: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name:        "ring_tokens_total",
 			Help:        "Number of tokens in the ring",
-			ConstLabels: map[string]string{"name": name}}),
-		numTokensGaugeVec: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
-			Name:        "ring_tokens_owned",
-			Help:        "The number of tokens in the ring owned by the member",
-			ConstLabels: map[string]string{"name": name}},
-			[]string{"member"}),
+			ConstLabels: map[string]string{"name": name},
+		}),
 		oldestTimestampGaugeVec: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name:        "ring_oldest_member_timestamp",
 			Help:        "Timestamp of the oldest member in the ring.",
-			ConstLabels: map[string]string{"name": name}},
+			ConstLabels: map[string]string{"name": name},
+		},
 			[]string{"state"}),
 		logger: logger,
 	}
@@ -285,21 +277,9 @@ func (r *Ring) starting(ctx context.Context) error {
 
 func (r *Ring) loop(ctx context.Context) error {
 	// Update the ring metrics at start of the main loop.
-	r.updateRingMetrics()
-	go func() {
-		// Start metrics update ticker to update the ring metrics.
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				r.updateRingMetrics()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	r.mtx.Lock()
+	r.updateRingMetrics(Different)
+	r.mtx.Unlock()
 
 	r.KVClient.WatchKey(ctx, r.key, func(value interface{}) bool {
 		if value == nil {
@@ -321,7 +301,7 @@ func (r *Ring) updateRingState(ringDesc *Desc) {
 	// Filter out all instances belonging to excluded zones.
 	if len(r.cfg.ExcludedZones) > 0 {
 		for instanceID, instance := range ringDesc.Ingesters {
-			if util.StringsContain(r.cfg.ExcludedZones, instance.Zone) {
+			if slices.Contains(r.cfg.ExcludedZones, instance.Zone) {
 				delete(ringDesc.Ingesters, instanceID)
 			}
 		}
@@ -334,6 +314,7 @@ func (r *Ring) updateRingState(ringDesc *Desc) {
 		// when watching the ring for updates).
 		r.mtx.Lock()
 		r.ringDesc = ringDesc
+		r.updateRingMetrics(rc)
 		r.mtx.Unlock()
 		return
 	}
@@ -343,6 +324,7 @@ func (r *Ring) updateRingState(ringDesc *Desc) {
 	ringTokensByZone := ringDesc.getTokensByZone()
 	ringInstanceByToken := ringDesc.getTokensInfo()
 	ringZones := getZones(ringTokensByZone)
+	oldestRegisteredTimestamp := ringDesc.getOldestRegisteredTimestamp()
 
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
@@ -351,11 +333,18 @@ func (r *Ring) updateRingState(ringDesc *Desc) {
 	r.ringTokensByZone = ringTokensByZone
 	r.ringInstanceByToken = ringInstanceByToken
 	r.ringZones = ringZones
+	r.oldestRegisteredTimestamp = oldestRegisteredTimestamp
 	r.lastTopologyChange = now
+
+	// Invalidate all cached subrings.
 	if r.shuffledSubringCache != nil {
-		// Invalidate all cached subrings.
 		r.shuffledSubringCache = make(map[subringCacheKey]*Ring)
 	}
+	if r.shuffledSubringWithLookbackCache != nil {
+		r.shuffledSubringWithLookbackCache = make(map[subringCacheKey]cachedSubringWithLookback)
+	}
+
+	r.updateRingMetrics(rc)
 }
 
 // Get returns n (or more) instances which form the replicas for the given key.
@@ -367,17 +356,19 @@ func (r *Ring) Get(key uint32, op Operation, bufDescs []InstanceDesc, bufHosts, 
 	}
 
 	var (
-		n          = r.cfg.ReplicationFactor
-		instances  = bufDescs[:0]
-		start      = searchToken(r.ringTokens, key)
-		iterations = 0
+		n            = r.cfg.ReplicationFactor
+		instances    = bufDescs[:0]
+		start        = searchToken(r.ringTokens, key)
+		iterations   = 0
+		maxZones     = len(r.ringTokensByZone)
+		maxInstances = len(r.ringDesc.Ingesters)
 
 		// We use a slice instead of a map because it's faster to search within a
 		// slice than lookup a map for a very low number of items.
 		distinctHosts = bufHosts[:0]
 		distinctZones = bufZones[:0]
 	)
-	for i := start; len(distinctHosts) < n && iterations < len(r.ringTokens); i++ {
+	for i := start; len(distinctHosts) < dsmath.Min(maxInstances, n) && len(distinctZones) < maxZones && iterations < len(r.ringTokens); i++ {
 		iterations++
 		// Wrap i around in the ring.
 		i %= len(r.ringTokens)
@@ -390,13 +381,13 @@ func (r *Ring) Get(key uint32, op Operation, bufDescs []InstanceDesc, bufHosts, 
 		}
 
 		// We want n *distinct* instances && distinct zones.
-		if util.StringsContain(distinctHosts, info.InstanceID) {
+		if slices.Contains(distinctHosts, info.InstanceID) {
 			continue
 		}
 
 		// Ignore if the instances don't have a zone set.
 		if r.cfg.ZoneAwarenessEnabled && info.Zone != "" {
-			if util.StringsContain(distinctZones, info.Zone) {
+			if slices.Contains(distinctZones, info.Zone) {
 				continue
 			}
 		}
@@ -533,52 +524,54 @@ func (r *Ring) GetReplicationSetForOperation(op Operation) (ReplicationSet, erro
 	}, nil
 }
 
-// countTokens returns the number of tokens and tokens within the range for each instance.
-// The ring read lock must be already taken when calling this function.
-func (r *Ring) countTokens() (map[string]uint32, map[string]uint32) {
-	owned := map[string]uint32{}
-	numTokens := map[string]uint32{}
-	for i, token := range r.ringTokens {
-		var diff uint32
+// CountTokens returns the number tokens within the range for each instance.
+// In case of zone-awareness, this method takes into account only tokens of
+// the same zone. More precisely, for each instance only the distance between
+// its tokens and tokens of the instances from the same zone will be considered.
+func (r *Desc) CountTokens() map[string]int64 {
+	var (
+		owned               = make(map[string]int64, len(r.Ingesters))
+		ringTokensByZone    = r.getTokensByZone()
+		ringInstanceByToken = r.getTokensInfo()
+	)
 
-		// Compute how many tokens are within the range.
-		if i+1 == len(r.ringTokens) {
-			diff = (math.MaxUint32 - token) + r.ringTokens[0]
-		} else {
-			diff = r.ringTokens[i+1] - token
+	for _, ringTokens := range ringTokensByZone {
+		for i, token := range ringTokens {
+			var prevToken uint32
+
+			// Compute how many tokens are within the range.
+			if i == 0 {
+				prevToken = ringTokens[len(ringTokens)-1]
+			} else {
+				prevToken = ringTokens[i-1]
+			}
+
+			diff := tokenDistance(prevToken, token)
+			info := ringInstanceByToken[token]
+			owned[info.InstanceID] = owned[info.InstanceID] + diff
 		}
-
-		info := r.ringInstanceByToken[token]
-		numTokens[info.InstanceID] = numTokens[info.InstanceID] + 1
-		owned[info.InstanceID] = owned[info.InstanceID] + diff
 	}
 
 	// Set to 0 the number of owned tokens by instances which don't have tokens yet.
-	for id := range r.ringDesc.Ingesters {
+	for id := range r.Ingesters {
 		if _, ok := owned[id]; !ok {
 			owned[id] = 0
-			numTokens[id] = 0
 		}
 	}
 
-	return numTokens, owned
+	return owned
 }
 
-// updateRingMetrics updates ring metrics.
-func (r *Ring) updateRingMetrics() {
-	r.mtx.RLock()
-	defer r.mtx.RUnlock()
-
-	numTokens, ownedRange := r.countTokens()
-	for id, totalOwned := range ownedRange {
-		r.memberOwnershipGaugeVec.WithLabelValues(id).Set(float64(totalOwned) / float64(math.MaxUint32))
-		r.numTokensGaugeVec.WithLabelValues(id).Set(float64(numTokens[id]))
+// updateRingMetrics updates ring metrics. Caller must be holding the Write lock!
+func (r *Ring) updateRingMetrics(compareResult CompareResult) {
+	if compareResult == Equal {
+		return
 	}
 
 	numByState := map[string]int{}
 	oldestTimestampByState := map[string]int64{}
 
-	// Initialised to zero so we emit zero-metrics (instead of not emitting anything)
+	// Initialized to zero so we emit zero-metrics (instead of not emitting anything)
 	for _, s := range []string{unhealthy, ACTIVE.String(), LEAVING.String(), PENDING.String(), JOINING.String()} {
 		numByState[s] = 0
 		oldestTimestampByState[s] = 0
@@ -601,6 +594,11 @@ func (r *Ring) updateRingMetrics() {
 	for state, timestamp := range oldestTimestampByState {
 		r.oldestTimestampGaugeVec.WithLabelValues(state).Set(float64(timestamp))
 	}
+
+	if compareResult == EqualButStatesAndTimestamps {
+		return
+	}
+
 	r.totalTokensGauge.Set(float64(len(r.ringTokens)))
 }
 
@@ -634,8 +632,11 @@ func (r *Ring) ShuffleShard(identifier string, size int) ReadRing {
 	}
 
 	result := r.shuffleShard(identifier, size, 0, time.Now())
-
-	r.setCachedShuffledSubring(identifier, size, result)
+	// Only cache subring if it is different from this ring, to avoid deadlocks in getCachedShuffledSubring,
+	// when we update the cached ring.
+	if result != r {
+		r.setCachedShuffledSubring(identifier, size, result)
+	}
 	return result
 }
 
@@ -645,14 +646,25 @@ func (r *Ring) ShuffleShard(identifier string, size int) ReadRing {
 // The returned subring may be unbalanced with regard to zones and should never be used for write
 // operations (read only).
 //
-// This function doesn't support caching.
+// This function supports caching, but the cache will only be effective if successive calls for the
+// same identifier are for increasing values of (now-lookbackPeriod).
 func (r *Ring) ShuffleShardWithLookback(identifier string, size int, lookbackPeriod time.Duration, now time.Time) ReadRing {
 	// Nothing to do if the shard size is not smaller then the actual ring.
 	if size <= 0 || r.InstancesCount() <= size {
 		return r
 	}
 
-	return r.shuffleShard(identifier, size, lookbackPeriod, now)
+	if cached := r.getCachedShuffledSubringWithLookback(identifier, size, lookbackPeriod, now); cached != nil {
+		return cached
+	}
+
+	result := r.shuffleShard(identifier, size, lookbackPeriod, now)
+
+	if result != r {
+		r.setCachedShuffledSubringWithLookback(identifier, size, lookbackPeriod, now, result)
+	}
+
+	return result
 }
 
 func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Duration, now time.Time) *Ring {
@@ -660,6 +672,16 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
+
+	// If all instances have RegisteredTimestamp within the lookback period,
+	// then all instances would be included in the resulting ring, so we can
+	// simply return this ring.
+	//
+	// If any instance had RegisteredTimestamp equal to 0 (it would not cause additional lookup of next instance),
+	// then r.oldestRegisteredTimestamp is zero too, and we skip this optimization.
+	if lookbackPeriod > 0 && r.oldestRegisteredTimestamp > 0 && r.oldestRegisteredTimestamp >= lookbackUntil {
+		return r
+	}
 
 	var numInstancesPerZone int
 	var actualZones []string
@@ -712,7 +734,7 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 					panic(ErrInconsistentTokensInfo)
 				}
 
-				// Ensure we select an unique instance.
+				// Ensure we select a unique instance.
 				if _, ok := shard[info.InstanceID]; ok {
 					continue
 				}
@@ -743,14 +765,17 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 	// Build a read-only ring for the shard.
 	shardDesc := &Desc{Ingesters: shard}
 	shardTokensByZone := shardDesc.getTokensByZone()
+	shardTokens := mergeTokenGroups(shardTokensByZone)
 
 	return &Ring{
 		cfg:              r.cfg,
 		strategy:         r.strategy,
 		ringDesc:         shardDesc,
-		ringTokens:       shardDesc.GetTokens(),
+		ringTokens:       shardTokens,
 		ringTokensByZone: shardTokensByZone,
 		ringZones:        getZones(shardTokensByZone),
+
+		oldestRegisteredTimestamp: shardDesc.getOldestRegisteredTimestamp(),
 
 		// We reference the original map as is in order to avoid copying. It's safe to do
 		// because this map is immutable by design and it's a superset of the actual instances
@@ -760,6 +785,56 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 		// For caching to work, remember these values.
 		lastTopologyChange: r.lastTopologyChange,
 	}
+}
+
+// mergeTokenGroups returns a sorted list of all tokens in each entry in groupsByName.
+// Each element of groupsByName is assumed to already be sorted.
+func mergeTokenGroups(groupsByName map[string][]uint32) []uint32 {
+	tokenCount := 0
+	groupsByIndex := make([][]uint32, 0, len(groupsByName))
+	nextIndex := make([]int, 0, len(groupsByName))
+
+	for _, group := range groupsByName {
+		// If there's only one group, there's nothing to merge.
+		if len(groupsByName) == 1 {
+			return group
+		}
+
+		tokenCount += len(group)
+		groupsByIndex = append(groupsByIndex, group)
+		nextIndex = append(nextIndex, 0)
+	}
+
+	merged := make([]uint32, 0, tokenCount)
+
+	for i := 0; i < tokenCount; i++ {
+		haveSeenGroupWithRemainingToken := false
+		lowestToken := uint32(0)
+		lowestTokenGroupIndex := 0
+
+		for groupIndex, group := range groupsByIndex {
+			nextIndexInGroup := nextIndex[groupIndex]
+
+			if nextIndexInGroup >= len(group) {
+				continue
+			}
+
+			if group[nextIndexInGroup] < lowestToken || !haveSeenGroupWithRemainingToken {
+				lowestToken = group[nextIndexInGroup]
+				lowestTokenGroupIndex = groupIndex
+				haveSeenGroupWithRemainingToken = true
+			}
+		}
+
+		if !haveSeenGroupWithRemainingToken {
+			return merged
+		}
+
+		merged = append(merged, lowestToken)
+		nextIndex[lowestTokenGroupIndex]++
+	}
+
+	return merged
 }
 
 // GetInstanceState returns the current state of an instance or an error if the
@@ -801,6 +876,11 @@ func (r *Ring) getCachedShuffledSubring(identifier string, size int) *Ring {
 		return nil
 	}
 
+	// No need to update cached subring, if it is the original ring itself.
+	if r == cached {
+		return cached
+	}
+
 	cached.mtx.Lock()
 	defer cached.mtx.Unlock()
 
@@ -831,6 +911,91 @@ func (r *Ring) setCachedShuffledSubring(identifier string, size int, subring *Ri
 	}
 }
 
+func (r *Ring) getCachedShuffledSubringWithLookback(identifier string, size int, lookbackPeriod time.Duration, now time.Time) *Ring {
+	if r.cfg.SubringCacheDisabled {
+		return nil
+	}
+
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+
+	cached, ok := r.shuffledSubringWithLookbackCache[subringCacheKey{identifier: identifier, shardSize: size, lookbackPeriod: lookbackPeriod}]
+	if !ok {
+		return nil
+	}
+
+	lookbackWindowStart := now.Add(-lookbackPeriod).Unix()
+	if lookbackWindowStart < cached.validForLookbackWindowsStartingAfter || lookbackWindowStart > cached.validForLookbackWindowsStartingBefore {
+		// The cached subring is not valid for the lookback window that has been requested.
+		return nil
+	}
+
+	cachedSubring := cached.subring
+
+	// No need to update the cached subring if it is the original ring itself.
+	if r == cachedSubring {
+		return cachedSubring
+	}
+
+	cachedSubring.mtx.Lock()
+	defer cachedSubring.mtx.Unlock()
+
+	// Update instance states and timestamps. We know that the topology is the same,
+	// so zones and tokens are equal.
+	for name, cachedIng := range cachedSubring.ringDesc.Ingesters {
+		ing := r.ringDesc.Ingesters[name]
+		cachedIng.State = ing.State
+		cachedIng.Timestamp = ing.Timestamp
+		cachedSubring.ringDesc.Ingesters[name] = cachedIng
+	}
+
+	return cachedSubring
+}
+
+func (r *Ring) setCachedShuffledSubringWithLookback(identifier string, size int, lookbackPeriod time.Duration, now time.Time, subring *Ring) {
+	if subring == nil || r.cfg.SubringCacheDisabled {
+		return
+	}
+
+	lookbackWindowStart := now.Add(-lookbackPeriod).Unix()
+	validForLookbackWindowsStartingBefore := int64(math.MaxInt64)
+
+	for _, instance := range subring.ringDesc.Ingesters {
+		registeredDuringLookbackWindow := instance.RegisteredTimestamp >= lookbackWindowStart
+
+		if registeredDuringLookbackWindow && instance.RegisteredTimestamp < validForLookbackWindowsStartingBefore {
+			validForLookbackWindowsStartingBefore = instance.RegisteredTimestamp
+		}
+	}
+
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	// Only cache if *this* ring hasn't changed since computing result
+	// (which can happen between releasing the read lock and getting read-write lock).
+	// Note that shuffledSubringWithLookbackCache can be only nil when set by test.
+	if r.shuffledSubringWithLookbackCache == nil {
+		return
+	}
+
+	if !r.lastTopologyChange.Equal(subring.lastTopologyChange) {
+		return
+	}
+
+	// Only update cache if subring's lookback window starts later than the previously cached subring for this identifier,
+	// if there is one. This prevents cache thrashing due to different calls competing if their lookback windows start
+	// before and after the time of an instance registering.
+	key := subringCacheKey{identifier: identifier, shardSize: size, lookbackPeriod: lookbackPeriod}
+
+	if existingEntry, haveCached := r.shuffledSubringWithLookbackCache[key]; !haveCached || existingEntry.validForLookbackWindowsStartingAfter < lookbackWindowStart {
+		r.shuffledSubringWithLookbackCache[key] = cachedSubringWithLookback{
+			subring:                               subring,
+			validForLookbackWindowsStartingAfter:  lookbackWindowStart,
+			validForLookbackWindowsStartingBefore: validForLookbackWindowsStartingBefore,
+		}
+	}
+}
+
 func (r *Ring) CleanupShuffleShardCache(identifier string) {
 	if r.cfg.SubringCacheDisabled {
 		return
@@ -844,6 +1009,29 @@ func (r *Ring) CleanupShuffleShardCache(identifier string) {
 			delete(r.shuffledSubringCache, k)
 		}
 	}
+
+	for k := range r.shuffledSubringWithLookbackCache {
+		if k.identifier == identifier {
+			delete(r.shuffledSubringWithLookbackCache, k)
+		}
+	}
+}
+
+func (r *Ring) casRing(ctx context.Context, f func(in interface{}) (out interface{}, retry bool, err error)) error {
+	return r.KVClient.CAS(ctx, r.key, f)
+}
+
+func (r *Ring) getRing(_ context.Context) (*Desc, error) {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+
+	ringDesc := proto.Clone(r.ringDesc).(*Desc)
+
+	return ringDesc, nil
+}
+
+func (r *Ring) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	newRingPageHandler(r, r.cfg.HeartbeatTimeout).handle(w, req)
 }
 
 // Operation describes which instances can be included in the replica set, based on their state.
@@ -860,7 +1048,7 @@ func NewOp(healthyStates []InstanceState, shouldExtendReplicaSet func(s Instance
 	}
 
 	if shouldExtendReplicaSet != nil {
-		for _, s := range []InstanceState{ACTIVE, LEAVING, PENDING, JOINING, LEAVING, LEFT} {
+		for _, s := range []InstanceState{ACTIVE, LEAVING, PENDING, JOINING, LEFT} {
 			if shouldExtendReplicaSet(s) {
 				op |= (0x10000 << s)
 			}

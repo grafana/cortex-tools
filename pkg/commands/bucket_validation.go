@@ -5,16 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/thanos-io/thanos/pkg/objstore"
+	"github.com/thanos-io/objstore"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -245,7 +244,7 @@ func (b *BucketValidationCommand) validateTestObjects(ctx context.Context) error
 			return errors.Wrapf(err, "failed to get object (%s)", objectPath)
 		}
 
-		content, err := ioutil.ReadAll(reader)
+		content, err := io.ReadAll(reader)
 		if err != nil {
 			return errors.Wrapf(err, "failed to read object (%s)", objectPath)
 		}
