@@ -754,7 +754,7 @@ github.com/gosimple/slug
 # github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 ## explicit; go 1.13
 github.com/grafana-tools/sdk
-# github.com/grafana/dskit v0.0.0-20230905112532-e4f33b342cb6
+# github.com/grafana/dskit v0.0.0-20230907071146-cc0661f32e42
 ## explicit; go 1.19
 github.com/grafana/dskit/aws
 github.com/grafana/dskit/backoff
@@ -797,7 +797,7 @@ github.com/grafana/dskit/user
 # github.com/grafana/gomemcache v0.0.0-20230316202710-a081dae0aba9
 ## explicit; go 1.18
 github.com/grafana/gomemcache/memcache
-# github.com/grafana/loki v1.6.2-0.20230905071424-a60c1777ce15
+# github.com/grafana/loki v1.6.2-0.20230907070655-40d5d6c744d1
 ## explicit; go 1.20
 github.com/grafana/loki/pkg/analytics
 github.com/grafana/loki/pkg/chunkenc

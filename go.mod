@@ -6,15 +6,15 @@ require (
 	github.com/alecthomas/chroma v0.7.0
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/cortexproject/cortex v1.15.2-0.20230901171400-63b372cbd008
-	github.com/go-kit/kit v0.12.0
+	github.com/go-kit/log v0.2.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b
 	github.com/google/go-github/v32 v32.1.0
 	github.com/gorilla/mux v1.8.0
 	github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
-	github.com/grafana/dskit v0.0.0-20230905112532-e4f33b342cb6
-	github.com/grafana/loki v1.6.2-0.20230905071424-a60c1777ce15
+	github.com/grafana/dskit v0.0.0-20230907071146-cc0661f32e42
+	github.com/grafana/loki v1.6.2-0.20230907070655-40d5d6c744d1
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing-contrib/go-stdlib v1.0.0
 	github.com/pkg/errors v0.9.1
@@ -109,7 +109,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/fsouza/fake-gcs-server v1.7.0 // indirect
-	github.com/go-kit/log v0.2.1 // indirect
+	github.com/go-kit/kit v0.12.0 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
