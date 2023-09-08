@@ -7,13 +7,11 @@ import (
 	"github.com/grafana/loki/pkg/logql/syntax"
 )
 
-// MatchForSeriesRequest extracts and parses multiple matcher groups from a slice of strings.
-// Does not perform validation as it's used for series queries
-// which allow empty matchers
-func MatchForSeriesRequest(xs []string) ([][]*labels.Matcher, error) {
+// Match extracts and parses multiple matcher groups from a slice of strings
+func Match(xs []string) ([][]*labels.Matcher, error) {
 	groups := make([][]*labels.Matcher, 0, len(xs))
 	for _, x := range xs {
-		ms, err := syntax.ParseMatchers(x, false)
+		ms, err := syntax.ParseMatchers(x)
 		if err != nil {
 			return nil, err
 		}

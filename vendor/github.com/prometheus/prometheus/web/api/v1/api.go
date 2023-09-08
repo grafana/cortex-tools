@@ -143,7 +143,6 @@ type RuntimeInfo struct {
 	CorruptionCount     int64     `json:"corruptionCount"`
 	GoroutineCount      int       `json:"goroutineCount"`
 	GOMAXPROCS          int       `json:"GOMAXPROCS"`
-	GOMEMLIMIT          int64     `json:"GOMEMLIMIT"`
 	GOGC                string    `json:"GOGC"`
 	GODEBUG             string    `json:"GODEBUG"`
 	StorageRetention    string    `json:"storageRetention"`
@@ -171,7 +170,7 @@ type TSDBAdminStats interface {
 	CleanTombstones() error
 	Delete(mint, maxt int64, ms ...*labels.Matcher) error
 	Snapshot(dir string, withHead bool) error
-	Stats(statsByLabelName string, limit int) (*tsdb.Stats, error)
+	Stats(statsByLabelName string) (*tsdb.Stats, error)
 	WALReplayStatus() (tsdb.WALReplayStatus, error)
 }
 
@@ -244,7 +243,7 @@ func NewAPI(
 	remoteReadConcurrencyLimit int,
 	remoteReadMaxBytesInFrame int,
 	isAgent bool,
-	corsOrigin *regexp.Regexp,
+	CORSOrigin *regexp.Regexp,
 	runtimeInfo func() (RuntimeInfo, error),
 	buildInfo *PrometheusVersion,
 	gatherer prometheus.Gatherer,
@@ -270,7 +269,7 @@ func NewAPI(
 		enableAdmin:      enableAdmin,
 		rulesRetriever:   rr,
 		logger:           logger,
-		CORSOrigin:       corsOrigin,
+		CORSOrigin:       CORSOrigin,
 		runtimeInfo:      runtimeInfo,
 		buildInfo:        buildInfo,
 		gatherer:         gatherer,
@@ -523,7 +522,7 @@ func (api *API) queryRange(r *http.Request) (result apiFuncResult) {
 	}
 	qry, err := api.QueryEngine.NewRangeQuery(ctx, api.Queryable, opts, r.FormValue("query"), start, end, step)
 	if err != nil {
-		return invalidParamError(err, "query")
+		return apiFuncResult{nil, &apiError{errorBadData, err}, nil, nil}
 	}
 	// From now on, we must only return with a finalizer in the result (to
 	// be called by the caller) or call qry.Close ourselves (which is
@@ -1295,24 +1294,8 @@ type RecordingRule struct {
 }
 
 func (api *API) rules(r *http.Request) apiFuncResult {
-	if err := r.ParseForm(); err != nil {
-		return apiFuncResult{nil, &apiError{errorBadData, errors.Wrapf(err, "error parsing form values")}, nil, nil}
-	}
-
-	queryFormToSet := func(values []string) map[string]struct{} {
-		set := make(map[string]struct{}, len(values))
-		for _, v := range values {
-			set[v] = struct{}{}
-		}
-		return set
-	}
-
-	rnSet := queryFormToSet(r.Form["rule_name[]"])
-	rgSet := queryFormToSet(r.Form["rule_group[]"])
-	fSet := queryFormToSet(r.Form["file[]"])
-
 	ruleGroups := api.rulesRetriever(r.Context()).RuleGroups()
-	res := &RuleDiscovery{RuleGroups: make([]*RuleGroup, 0, len(ruleGroups))}
+	res := &RuleDiscovery{RuleGroups: make([]*RuleGroup, len(ruleGroups))}
 	typ := strings.ToLower(r.URL.Query().Get("type"))
 
 	if typ != "" && typ != "alert" && typ != "record" {
@@ -1322,20 +1305,7 @@ func (api *API) rules(r *http.Request) apiFuncResult {
 	returnAlerts := typ == "" || typ == "alert"
 	returnRecording := typ == "" || typ == "record"
 
-	rgs := make([]*RuleGroup, 0, len(ruleGroups))
-	for _, grp := range ruleGroups {
-		if len(rgSet) > 0 {
-			if _, ok := rgSet[grp.Name()]; !ok {
-				continue
-			}
-		}
-
-		if len(fSet) > 0 {
-			if _, ok := fSet[grp.File()]; !ok {
-				continue
-			}
-		}
-
+	for i, grp := range ruleGroups {
 		apiRuleGroup := &RuleGroup{
 			Name:           grp.Name(),
 			File:           grp.File(),
@@ -1345,20 +1315,14 @@ func (api *API) rules(r *http.Request) apiFuncResult {
 			EvaluationTime: grp.GetEvaluationTime().Seconds(),
 			LastEvaluation: grp.GetLastEvaluation(),
 		}
-		for _, rr := range grp.Rules() {
+		for _, r := range grp.Rules() {
 			var enrichedRule Rule
 
-			if len(rnSet) > 0 {
-				if _, ok := rnSet[rr.Name()]; !ok {
-					continue
-				}
-			}
-
 			lastError := ""
-			if rr.LastError() != nil {
-				lastError = rr.LastError().Error()
+			if r.LastError() != nil {
+				lastError = r.LastError().Error()
 			}
-			switch rule := rr.(type) {
+			switch rule := r.(type) {
 			case *rules.AlertingRule:
 				if !returnAlerts {
 					break
@@ -1396,18 +1360,12 @@ func (api *API) rules(r *http.Request) apiFuncResult {
 				err := errors.Errorf("failed to assert type of rule '%v'", rule.Name())
 				return apiFuncResult{nil, &apiError{errorInternal, err}, nil, nil}
 			}
-
 			if enrichedRule != nil {
 				apiRuleGroup.Rules = append(apiRuleGroup.Rules, enrichedRule)
 			}
 		}
-
-		// If the rule group response has no rules, skip it - this means we filtered all the rules of this group.
-		if len(apiRuleGroup.Rules) > 0 {
-			rgs = append(rgs, apiRuleGroup)
-		}
+		res.RuleGroups[i] = apiRuleGroup
 	}
-	res.RuleGroups = rgs
 	return apiFuncResult{res, nil, nil, nil}
 }
 
@@ -1472,15 +1430,8 @@ func TSDBStatsFromIndexStats(stats []index.Stat) []TSDBStat {
 	return result
 }
 
-func (api *API) serveTSDBStatus(r *http.Request) apiFuncResult {
-	limit := 10
-	if s := r.FormValue("limit"); s != "" {
-		var err error
-		if limit, err = strconv.Atoi(s); err != nil || limit < 1 {
-			return apiFuncResult{nil, &apiError{errorBadData, errors.New("limit must be a positive number")}, nil, nil}
-		}
-	}
-	s, err := api.db.Stats(labels.MetricName, limit)
+func (api *API) serveTSDBStatus(*http.Request) apiFuncResult {
+	s, err := api.db.Stats(labels.MetricName)
 	if err != nil {
 		return apiFuncResult{nil, &apiError{errorInternal, err}, nil, nil}
 	}
@@ -1491,7 +1442,7 @@ func (api *API) serveTSDBStatus(r *http.Request) apiFuncResult {
 	chunkCount := int64(math.NaN())
 	for _, mF := range metrics {
 		if *mF.Name == "prometheus_tsdb_head_chunks" {
-			m := mF.Metric[0]
+			m := *mF.Metric[0]
 			if m.Gauge != nil {
 				chunkCount = int64(m.Gauge.GetValue())
 				break

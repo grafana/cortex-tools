@@ -12,10 +12,7 @@ import (
 	"github.com/thanos-io/objstore"
 )
 
-var (
-	errObjectDoesNotExist  = errors.New("object does not exist")
-	errKeyPermissionDenied = errors.New("object key permission denied")
-)
+var errObjectDoesNotExist = errors.New("object does not exist")
 
 // ClientMock mocks objstore.Bucket
 type ClientMock struct {
@@ -176,11 +173,6 @@ func (m *ClientMock) Exists(ctx context.Context, name string) (bool, error) {
 // IsObjNotFoundErr mocks objstore.Bucket.IsObjNotFoundErr()
 func (m *ClientMock) IsObjNotFoundErr(err error) bool {
 	return err == errObjectDoesNotExist
-}
-
-// IsAccessDeniedErr mocks objstore.Bucket.IsAccessDeniedErr()
-func (m *ClientMock) IsAccessDeniedErr(err error) bool {
-	return err == errKeyPermissionDenied
 }
 
 // ObjectSize mocks objstore.Bucket.Attributes()

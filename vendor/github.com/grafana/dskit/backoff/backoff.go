@@ -77,12 +77,9 @@ func (b *Backoff) Wait() {
 	sleepTime := b.NextDelay()
 
 	if b.Ongoing() {
-		timer := time.NewTimer(sleepTime)
-		defer timer.Stop()
-
 		select {
 		case <-b.ctx.Done():
-		case <-timer.C:
+		case <-time.After(sleepTime):
 		}
 	}
 }

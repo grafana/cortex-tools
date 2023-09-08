@@ -197,17 +197,16 @@ func (c *indexReaderWriter) SetChunkFilterer(f chunk.RequestChunkFilterer) {
 }
 
 type chunkGroup struct {
-	schema config.SchemaConfig
 	chunks []chunk.Chunk
+	keys   []string
 }
 
 func (c chunkGroup) Len() int { return len(c.chunks) }
 func (c chunkGroup) Swap(i, j int) {
 	c.chunks[i], c.chunks[j] = c.chunks[j], c.chunks[i]
+	c.keys[i], c.keys[j] = c.keys[j], c.keys[i]
 }
-func (c chunkGroup) Less(i, j int) bool {
-	return c.schema.ExternalKey(c.chunks[i].ChunkRef) < c.schema.ExternalKey(c.chunks[j].ChunkRef)
-}
+func (c chunkGroup) Less(i, j int) bool { return c.keys[i] < c.keys[j] }
 
 func (c *indexReaderWriter) GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error) {
 	chks, err := c.GetChunkRefs(ctx, userID, from, through, matchers...)
@@ -221,7 +220,7 @@ func (c *indexReaderWriter) GetSeries(ctx context.Context, userID string, from, 
 func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.ChunkRef, matchers []*labels.Matcher) ([]labels.Labels, error) {
 	// download one per series and merge
 	// group chunks by series
-	chunksBySeries := filterChunkRefsByUniqueFingerprint(in)
+	chunksBySeries, keys := filterChunkRefsByUniqueFingerprint(c.schemaCfg, in)
 
 	// bound concurrency
 	groups := make([]chunkGroup, 0, len(chunksBySeries)/c.chunkBatchSize+1)
@@ -237,8 +236,9 @@ func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.Ch
 	}
 
 	for split > 0 {
-		groups = append(groups, chunkGroup{c.schemaCfg, chunksBySeries[:split]})
+		groups = append(groups, chunkGroup{chunksBySeries[:split], keys[:split]})
 		chunksBySeries = chunksBySeries[split:]
+		keys = keys[split:]
 		if len(chunksBySeries) < split {
 			split = len(chunksBySeries)
 		}
@@ -251,7 +251,7 @@ func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.Ch
 		group := g
 		jobs = append(jobs, f(func() ([]labels.Labels, error) {
 			sort.Sort(group)
-			chunks, err := c.fetcher.FetchChunks(ctx, group.chunks)
+			chunks, err := c.fetcher.FetchChunks(ctx, group.chunks, group.keys)
 			if err != nil {
 				return nil, err
 			}
@@ -279,7 +279,7 @@ func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.Ch
 		}))
 	}
 
-	perJobResults := make([][]labels.Labels, len(jobs))
+	results := make([]labels.Labels, 0, len(chunksBySeries))
 
 	// Picking an arbitrary bound of 20 numConcurrent jobs.
 	numConcurrent := len(jobs)
@@ -294,7 +294,7 @@ func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.Ch
 		func(_ context.Context, idx int) error {
 			res, err := jobs[idx]()
 			if res != nil {
-				perJobResults[idx] = res
+				results = append(results, res...)
 			}
 			return err
 		},
@@ -302,10 +302,6 @@ func (c *indexReaderWriter) chunksToSeries(ctx context.Context, in []logproto.Ch
 		return nil, err
 	}
 
-	results := make([]labels.Labels, len(chunksBySeries)) // Flatten out the per-job results.
-	for _, innerSlice := range perJobResults {
-		results = append(results, innerSlice...)
-	}
 	sort.Slice(results, func(i, j int) bool {
 		return labels.Compare(results[i], results[j]) < 0
 	})
@@ -687,13 +683,13 @@ func (c *indexReaderWriter) lookupLabelNamesByChunks(ctx context.Context, from, 
 
 	// Filter out chunks that are not in the selected time range and keep a single chunk per fingerprint
 	filtered := filterChunksByTime(from, through, chunks)
-	filtered = filterChunksByUniqueFingerprint(filtered)
+	filtered, keys := filterChunksByUniqueFingerprint(c.schemaCfg, filtered)
 	level.Debug(log).Log("Chunks post filtering", len(chunks))
 
 	chunksPerQuery.Observe(float64(len(filtered)))
 
 	// Now fetch the actual chunk data from Memcache / S3
-	allChunks, err := c.fetcher.FetchChunks(ctx, filtered)
+	allChunks, err := c.fetcher.FetchChunks(ctx, filtered, keys)
 	if err != nil {
 		level.Error(log).Log("msg", "FetchChunks", "err", err)
 		return nil, err

@@ -121,18 +121,8 @@ func validateMatchers(matchers []*labels.Matcher) error {
 
 // ParseMatchers parses a string and returns labels matchers, if the expression contains
 // anything else it will return an error.
-func ParseMatchers(input string, validate bool) ([]*labels.Matcher, error) {
-	var (
-		expr Expr
-		err  error
-	)
-
-	if validate {
-		expr, err = ParseExpr(input)
-	} else {
-		expr, err = ParseExprWithoutValidation(input)
-	}
-
+func ParseMatchers(input string) ([]*labels.Matcher, error) {
+	expr, err := ParseExpr(input)
 	if err != nil {
 		return nil, err
 	}

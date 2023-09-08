@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/grafana/dskit/middleware"
+	"github.com/weaveworks/common/middleware"
 )
 
 // NOTE(kavi): Why new type?

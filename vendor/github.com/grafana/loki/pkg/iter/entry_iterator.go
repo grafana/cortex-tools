@@ -20,14 +20,14 @@ type EntryIterator interface {
 }
 
 type EntryIteratorOptions struct {
-	KeepStructuredMetdata bool
+	KeepNonIndexedLabels bool
 }
 
 type EntryIteratorOption func(*EntryIteratorOptions)
 
-func WithKeepStructuredMetadata() EntryIteratorOption {
+func WithKeepNonIndexedLabels() EntryIteratorOption {
 	return func(o *EntryIteratorOptions) {
-		o.KeepStructuredMetdata = true
+		o.KeepNonIndexedLabels = true
 	}
 }
 

@@ -32,17 +32,8 @@ type Expr interface {
 	Pretty(level int) string
 }
 
-func Clone[T Expr](e T) (T, error) {
-	var empty T
-	copied, err := ParseExpr(e.String())
-	if err != nil {
-		return empty, err
-	}
-	cast, ok := copied.(T)
-	if !ok {
-		return empty, fmt.Errorf("unpexpected type of cloned expression: want %T, got %T", empty, copied)
-	}
-	return cast, nil
+func Clone(e Expr) (Expr, error) {
+	return ParseExpr(e.String())
 }
 
 // implicit holds default implementations
@@ -284,7 +275,7 @@ func (e *PipelineExpr) Pipeline() (log.Pipeline, error) {
 func (e *PipelineExpr) HasFilter() bool {
 	for _, p := range e.MultiStages {
 		switch p.(type) {
-		case *LineFilterExpr, *LabelFilterExpr:
+		case *LineFilterExpr, *LabelFilterExpr, *DistinctFilterExpr:
 			return true
 		default:
 			continue
@@ -295,7 +286,6 @@ func (e *PipelineExpr) HasFilter() bool {
 
 type LineFilterExpr struct {
 	Left  *LineFilterExpr
-	Or    *LineFilterExpr
 	Ty    labels.MatchType
 	Match string
 	Op    string
@@ -308,18 +298,6 @@ func newLineFilterExpr(ty labels.MatchType, op, match string) *LineFilterExpr {
 		Match: match,
 		Op:    op,
 	}
-}
-
-func newOrLineFilter(left, right *LineFilterExpr) *LineFilterExpr {
-	right.Ty = left.Ty
-
-	if left.Ty == labels.MatchEqual || left.Ty == labels.MatchRegexp {
-		left.Or = right
-		return left
-	}
-
-	// !(left or right) == (!left and !right).
-	return newNestedLineFilterExpr(left, right)
 }
 
 func newNestedLineFilterExpr(left *LineFilterExpr, right *LineFilterExpr) *LineFilterExpr {
@@ -395,17 +373,10 @@ func (e *LineFilterExpr) Filter() (log.Filterer, error) {
 			}
 			acc = append(acc, next)
 		default:
-			var next log.Filterer
-			var err error
-			if curr.Or != nil {
-				next, err = newOrFilter(curr)
-			} else {
-				next, err = log.NewFilter(curr.Match, curr.Ty)
-			}
+			next, err := log.NewFilter(curr.Match, curr.Ty)
 			if err != nil {
 				return nil, err
 			}
-
 			acc = append(acc, next)
 		}
 	}
@@ -421,23 +392,6 @@ func (e *LineFilterExpr) Filter() (log.Filterer, error) {
 	}
 
 	return log.NewAndFilters(acc), nil
-}
-
-func newOrFilter(f *LineFilterExpr) (log.Filterer, error) {
-	orFilter, err := log.NewFilter(f.Match, f.Ty)
-	if err != nil {
-		return nil, err
-	}
-
-	for or := f.Or; or != nil; or = or.Or {
-		filter, err := log.NewFilter(or.Match, or.Ty)
-		if err != nil {
-			return nil, err
-		}
-		orFilter = log.ChainOrFilter(orFilter, filter)
-	}
-
-	return orFilter, nil
 }
 
 func (e *LineFilterExpr) Stage() (log.Stage, error) {
@@ -715,11 +669,7 @@ func newLabelFmtExpr(fmts []log.LabelFmt) *LabelFmtExpr {
 	}
 }
 
-func (e *LabelFmtExpr) Shardable() bool {
-	// While LabelFmt is shardable in certain cases, it is not always,
-	// but this is left to the shardmapper to determine
-	return true
-}
+func (e *LabelFmtExpr) Shardable() bool { return false }
 
 func (e *LabelFmtExpr) Walk(f WalkFn) { f(e) }
 
@@ -776,6 +726,37 @@ func (j *JSONExpressionParser) String() string {
 		sb.WriteString(strconv.Quote(exp.Expression))
 
 		if i+1 != len(j.Expressions) {
+			sb.WriteString(",")
+		}
+	}
+	return sb.String()
+}
+
+type DistinctFilterExpr struct {
+	labels []string
+	implicit
+}
+
+func newDistinctFilterExpr(labels []string) *DistinctFilterExpr {
+	return &DistinctFilterExpr{
+		labels: labels,
+	}
+}
+
+func (e *DistinctFilterExpr) Shardable() bool { return false }
+
+func (e *DistinctFilterExpr) Walk(f WalkFn) { f(e) }
+
+func (e *DistinctFilterExpr) Stage() (log.Stage, error) {
+	return log.NewDistinctFilter(e.labels)
+}
+
+func (e *DistinctFilterExpr) String() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s %s ", OpPipe, OpFilterDistinct))
+	for i, label := range e.labels {
+		sb.WriteString(label)
+		if i+1 != len(e.labels) {
 			sb.WriteString(",")
 		}
 	}
@@ -940,19 +921,6 @@ func (r *LogRange) Walk(f WalkFn) {
 	r.Left.Walk(f)
 }
 
-// WithoutUnwrap returns a copy of the log range without the unwrap statement.
-func (r *LogRange) WithoutUnwrap() (*LogRange, error) {
-	left, err := Clone(r.Left)
-	if err != nil {
-		return nil, err
-	}
-	return &LogRange{
-		Left:     left,
-		Interval: r.Interval,
-		Offset:   r.Offset,
-	}, nil
-}
-
 func newLogRange(left LogSelectorExpr, interval time.Duration, u *UnwrapExpr, o *OffsetExpr) *LogRange {
 	var offset time.Duration
 	if o != nil {
@@ -1067,6 +1035,8 @@ const (
 
 	// function filters
 	OpFilterIP = "ip"
+
+	OpFilterDistinct = "distinct"
 
 	// drop labels
 	OpDrop = "drop"
@@ -1249,28 +1219,26 @@ type Grouping struct {
 func (g Grouping) String() string {
 	var sb strings.Builder
 
+	if g.Groups == nil {
+		return ""
+	}
+
 	if g.Without {
 		sb.WriteString(" without ")
 	} else {
 		sb.WriteString(" by ")
 	}
 
-	sb.WriteString("(")
-	sb.WriteString(strings.Join(g.Groups, ","))
-	sb.WriteString(")")
+	if len(g.Groups) > 0 {
+		sb.WriteString("(")
+		sb.WriteString(strings.Join(g.Groups, ","))
+		sb.WriteString(")")
+	}
+	if len(g.Groups) == 0 {
+		sb.WriteString("()")
+	}
 
 	return sb.String()
-}
-
-// whether grouping doesn't change the result
-func (g Grouping) Noop() bool {
-	return len(g.Groups) == 0 && g.Without
-}
-
-// whether grouping reduces the result to a single value
-// with no labels
-func (g Grouping) Singleton() bool {
-	return len(g.Groups) == 0 && !g.Without
 }
 
 // VectorAggregationExpr all vector aggregation expressions support grouping by/without label(s),
@@ -1372,60 +1340,33 @@ func (e *VectorAggregationExpr) String() string {
 			params = []string{e.Left.String()}
 		}
 	}
-	return formatVectorOperation(e.Operation, e.Grouping, params...)
+	return formatOperation(e.Operation, e.Grouping, params...)
 }
 
 // impl SampleExpr
 func (e *VectorAggregationExpr) Shardable() bool {
-	if !shardableOps[e.Operation] || !e.Left.Shardable() {
-		return false
-	}
-
-	switch e.Operation {
-
-	case OpTypeCount, OpTypeAvg:
+	if e.Operation == OpTypeCount || e.Operation == OpTypeAvg {
+		if !e.Left.Shardable() {
+			return false
+		}
 		// count is shardable if labels are not mutated
-		// otherwise distinct values can be present in multiple shards and
-		// counted twice.
-		// avg is similar since it's remapped to sum/count.
-		// TODO(owen-d): this is hard to figure out; we should refactor to
-		// make these relationships clearer, safer, and more extensible.
-		shardable := !ReducesLabels(e.Left)
-
-		return shardable
-
-	case OpTypeMax, OpTypeMin:
-		// max(<range_aggr>) can be sharded by pushing down the max|min aggregation,
-		// but max(<vector_aggr>) cannot. It needs to perform the
-		// aggregation on the total result set, and then pick the max|min.
-		// For instance, `max(max_over_time)` or `max(rate)` can turn into
-		// `max( max(rate(shard1)) ++ max(rate(shard2)) ... etc)`,
-		// but you can’t do
-		// `max( max(sum(rate(shard1))) ++ max(sum(rate(shard2))) ... etc)`
-		// because it’s only taking the maximum from each shard,
-		// but we actually need to sum all the shards then put the max on top
-		if _, ok := e.Left.(*RangeAggregationExpr); ok {
-			return true
-		}
-		return false
-
-	case OpTypeSum:
-		// sum can shard & merge vector & range aggregations, but only if
-		// the resulting computation is commutative and associative.
-		// This does not apply to min & max, because while `min(min(min))`
-		// satisfies the above, sum( sum(min(shard1) ++ sum(min(shard2)) )
-		// does not
-		if child, ok := e.Left.(*VectorAggregationExpr); ok {
-			switch child.Operation {
-			case OpTypeMin, OpTypeMax:
-				return false
+		// otherwise distinct values can be counted twice per shard
+		shardable := true
+		e.Left.Walk(func(e interface{}) {
+			switch e.(type) {
+			// LabelParserExpr is normally shardable, but not in this case.
+			// TODO(owen-d): I think LabelParserExpr is shardable
+			// for avg, but not for count. Let's refactor to make this
+			// cleaner. For now I'm disallowing sharding on both.
+			case *LabelParserExpr:
+				shardable = false
+			case *LogfmtParserExpr:
+				shardable = false
 			}
-		}
-		return true
-
+		})
+		return shardable
 	}
-
-	return true
+	return shardableOps[e.Operation] && e.Left.Shardable()
 }
 
 func (e *VectorAggregationExpr) Walk(f WalkFn) {
@@ -1882,7 +1823,7 @@ func (e *LiteralExpr) Value() (float64, error) {
 
 // helper used to impl Stringer for vector and range aggregations
 // nolint:interfacer
-func formatVectorOperation(op string, grouping *Grouping, params ...string) string {
+func formatOperation(op string, grouping *Grouping, params ...string) string {
 	nonEmptyParams := make([]string, 0, len(params))
 	for _, p := range params {
 		if p != "" {
@@ -1892,7 +1833,7 @@ func formatVectorOperation(op string, grouping *Grouping, params ...string) stri
 
 	var sb strings.Builder
 	sb.WriteString(op)
-	if grouping != nil && !grouping.Singleton() {
+	if grouping != nil {
 		sb.WriteString(grouping.String())
 	}
 	sb.WriteString("(")
@@ -1980,9 +1921,7 @@ func (e *LabelReplaceExpr) String() string {
 	return sb.String()
 }
 
-// shardableOps lists the operations which may be sharded, but are not
-// guaranteed to be. See the `Shardable()` implementations
-// on the respective expr types for more details.
+// shardableOps lists the operations which may be sharded.
 // topk, botk, max, & min all must be concatenated and then evaluated in order to avoid
 // potential data loss due to series distribution across shards.
 // For example, grouping by `cluster` for a `max` operation may yield
@@ -2005,11 +1944,8 @@ var shardableOps = map[string]bool{
 	// avg is only marked as shardable because we remap it into sum/count.
 	OpTypeAvg:   true,
 	OpTypeCount: true,
-	OpTypeMax:   true,
-	OpTypeMin:   true,
 
 	// range vector ops
-	OpRangeTypeAvg:       true,
 	OpRangeTypeCount:     true,
 	OpRangeTypeRate:      true,
 	OpRangeTypeBytes:     true,
@@ -2091,30 +2027,3 @@ func (e *VectorExpr) Pipeline() (log.Pipeline, error)         { return log.NewNo
 func (e *VectorExpr) Matchers() []*labels.Matcher             { return nil }
 func (e *VectorExpr) MatcherGroups() ([]MatcherRange, error)  { return nil, e.err }
 func (e *VectorExpr) Extractor() (log.SampleExtractor, error) { return nil, nil }
-
-func ReducesLabels(e Expr) (conflict bool) {
-	e.Walk(func(e interface{}) {
-		switch expr := e.(type) {
-		// Technically, any parser that mutates labels could cause the query
-		// to be non-shardable _if_ the total (inherent+extracted) labels
-		// exist on two different shards, but this is incredibly unlikely
-		// for parsers which add new labels so I (owen-d) am preferring
-		// to continue sharding in those cases and only prevent sharding
-		// when using `drop` or `keep` which reduce labels to a smaller subset
-		// more likely to collide across shards.
-		case *KeepLabelsExpr, *DropLabelsExpr:
-			conflict = true
-		case *LabelFmtExpr:
-			// TODO(owen-d): renaming is shardable in many cases, but will
-			// likely require a `sum without ()` wrapper to combine the
-			// same extracted labelsets executed on different shards
-			for _, f := range expr.Formats {
-				if f.Rename {
-					conflict = true
-					break
-				}
-			}
-		}
-	})
-	return
-}

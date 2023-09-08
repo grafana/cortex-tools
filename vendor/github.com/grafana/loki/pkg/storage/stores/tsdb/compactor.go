@@ -47,12 +47,7 @@ func (i indexProcessor) OpenCompactedIndexFile(ctx context.Context, path, tableN
 		}
 	}()
 
-	indexFormat, err := periodConfig.TSDBFormat()
-	if err != nil {
-		return nil, err
-	}
-
-	builder := NewBuilder(indexFormat)
+	builder := NewBuilder(index.LiveFormat)
 	err = indexFile.(*TSDBFile).Index.(*TSDBIndex).ForSeries(ctx, nil, 0, math.MaxInt64, func(lbls labels.Labels, fp model.Fingerprint, chks []index.ChunkMeta) {
 		builder.AddSeries(lbls.Copy(), fp, chks)
 	}, labels.MustNewMatcher(labels.MatchEqual, "", ""))
@@ -154,12 +149,7 @@ func (t *tableCompactor) CompactTable() error {
 			}
 		}
 
-		indexType, err := t.periodConfig.TSDBFormat()
-		if err != nil {
-			return err
-		}
-
-		builder, err := setupBuilder(t.ctx, indexType, userID, existingUserIndexSet, multiTenantIndices)
+		builder, err := setupBuilder(t.ctx, userID, existingUserIndexSet, multiTenantIndices)
 		if err != nil {
 			return err
 		}
@@ -179,12 +169,7 @@ func (t *tableCompactor) CompactTable() error {
 			continue
 		}
 
-		indexType, err := t.periodConfig.TSDBFormat()
-		if err != nil {
-			return err
-		}
-
-		builder, err := setupBuilder(t.ctx, indexType, userID, srcIdxSet, []Index{})
+		builder, err := setupBuilder(t.ctx, userID, srcIdxSet, []Index{})
 		if err != nil {
 			return err
 		}
@@ -206,9 +191,9 @@ func (t *tableCompactor) CompactTable() error {
 
 // setupBuilder creates a Builder for a single user.
 // It combines the users index from multiTenantIndexes and its existing compacted index(es)
-func setupBuilder(ctx context.Context, indexType int, userID string, sourceIndexSet compactor.IndexSet, multiTenantIndexes []Index) (*Builder, error) {
+func setupBuilder(ctx context.Context, userID string, sourceIndexSet compactor.IndexSet, multiTenantIndexes []Index) (*Builder, error) {
 	sourceIndexes := sourceIndexSet.ListSourceFiles()
-	builder := NewBuilder(indexType)
+	builder := NewBuilder(index.LiveFormat)
 
 	// add users index from multi-tenant indexes to the builder
 	for _, idx := range multiTenantIndexes {

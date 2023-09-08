@@ -52,7 +52,6 @@ func newDeleteRequestsTable(workingDirectory string, indexStorageClient storage.
 		return nil, err
 	}
 
-	table.wg.Add(1)
 	go table.loop()
 	return table, nil
 }
@@ -83,6 +82,7 @@ func (t *deleteRequestsTable) loop() {
 	uploadTicker := time.NewTicker(5 * time.Minute)
 	defer uploadTicker.Stop()
 
+	t.wg.Add(1)
 	defer t.wg.Done()
 
 	for {

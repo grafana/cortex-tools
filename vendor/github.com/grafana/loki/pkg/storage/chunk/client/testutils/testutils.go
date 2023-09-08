@@ -2,7 +2,6 @@ package testutils
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"time"
@@ -11,9 +10,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 
-	"github.com/grafana/loki/pkg/chunkenc"
 	"github.com/grafana/loki/pkg/ingester/client"
-	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/storage/chunk"
 	chunkclient "github.com/grafana/loki/pkg/storage/chunk/client"
 	"github.com/grafana/loki/pkg/storage/config"
@@ -85,10 +82,10 @@ func CreateChunks(scfg config.SchemaConfig, startIndex, batchSize int, from mode
 }
 
 func DummyChunkFor(from, through model.Time, metric labels.Labels) chunk.Chunk {
-	cs := chunkenc.NewMemChunk(chunkenc.ChunkFormatV4, chunkenc.EncGZIP, chunkenc.UnorderedWithStructuredMetadataHeadBlockFmt, 256*1024, 0)
+	cs := chunk.New()
 
 	for ts := from; ts <= through; ts = ts.Add(15 * time.Second) {
-		err := cs.Append(&logproto.Entry{Timestamp: ts.Time(), Line: fmt.Sprintf("line ts=%d", ts)})
+		_, err := cs.Add(model.SamplePair{Timestamp: ts, Value: 0})
 		if err != nil {
 			panic(err)
 		}
@@ -98,7 +95,7 @@ func DummyChunkFor(from, through model.Time, metric labels.Labels) chunk.Chunk {
 		userID,
 		client.Fingerprint(metric),
 		metric,
-		chunkenc.NewFacade(cs, 0, 0),
+		cs,
 		from,
 		through,
 	)

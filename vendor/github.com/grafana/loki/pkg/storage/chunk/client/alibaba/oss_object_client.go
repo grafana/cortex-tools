@@ -8,9 +8,9 @@ import (
 	"strconv"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/grafana/dskit/instrument"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/weaveworks/common/instrument"
 
 	"github.com/grafana/loki/pkg/storage/chunk/client"
 )
@@ -69,19 +69,6 @@ func NewOssObjectClient(_ context.Context, cfg OssConfig) (client.ObjectClient, 
 }
 
 func (s *OssObjectClient) Stop() {
-}
-
-func (s *OssObjectClient) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
-	var options []oss.Option
-	err := instrument.CollectedRequest(ctx, "OSS.ObjectExists", ossRequestDuration, instrument.ErrorCode, func(ctx context.Context) error {
-		_, requestErr := s.defaultBucket.GetObjectMeta(objectKey, options...)
-		return requestErr
-	})
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
 }
 
 // GetObject returns a reader and the size for the specified object key from the configured OSS bucket.
@@ -175,6 +162,3 @@ func (s *OssObjectClient) IsObjectNotFoundErr(err error) bool {
 		return false
 	}
 }
-
-// TODO(dannyk): implement for client
-func (s *OssObjectClient) IsRetryableErr(error) bool { return false }

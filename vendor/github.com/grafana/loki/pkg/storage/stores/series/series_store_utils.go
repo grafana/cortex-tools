@@ -8,6 +8,7 @@ import (
 
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/storage/chunk"
+	"github.com/grafana/loki/pkg/storage/config"
 	"github.com/grafana/loki/pkg/util"
 )
 
@@ -47,8 +48,9 @@ func labelNamesFromChunks(chunks []chunk.Chunk) []string {
 	return result.Strings()
 }
 
-func filterChunksByUniqueFingerprint(chunks []chunk.Chunk) []chunk.Chunk {
+func filterChunksByUniqueFingerprint(s config.SchemaConfig, chunks []chunk.Chunk) ([]chunk.Chunk, []string) {
 	filtered := make([]chunk.Chunk, 0, len(chunks))
+	keys := make([]string, 0, len(chunks))
 	uniqueFp := map[model.Fingerprint]struct{}{}
 
 	for _, chunk := range chunks {
@@ -56,13 +58,15 @@ func filterChunksByUniqueFingerprint(chunks []chunk.Chunk) []chunk.Chunk {
 			continue
 		}
 		filtered = append(filtered, chunk)
+		keys = append(keys, s.ExternalKey(chunk.ChunkRef))
 		uniqueFp[chunk.FingerprintModel()] = struct{}{}
 	}
-	return filtered
+	return filtered, keys
 }
 
-func filterChunkRefsByUniqueFingerprint(chunks []logproto.ChunkRef) []chunk.Chunk {
+func filterChunkRefsByUniqueFingerprint(s config.SchemaConfig, chunks []logproto.ChunkRef) ([]chunk.Chunk, []string) {
 	filtered := make([]chunk.Chunk, 0, len(chunks))
+	keys := make([]string, 0, len(chunks))
 	uniqueFp := map[model.Fingerprint]struct{}{}
 
 	for _, c := range chunks {
@@ -72,9 +76,10 @@ func filterChunkRefsByUniqueFingerprint(chunks []logproto.ChunkRef) []chunk.Chun
 		filtered = append(filtered, chunk.Chunk{
 			ChunkRef: c,
 		})
+		keys = append(keys, s.ExternalKey(c))
 		uniqueFp[c.FingerprintModel()] = struct{}{}
 	}
-	return filtered
+	return filtered, keys
 }
 
 func uniqueStrings(cs []string) []string {

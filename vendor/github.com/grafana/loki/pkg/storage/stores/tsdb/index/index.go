@@ -61,6 +61,9 @@ const (
 	fingerprintInterval = 1 << 10
 
 	millisecondsInHour = int64(time.Hour / time.Millisecond)
+
+	// The format that will be written by this process
+	LiveFormat = FormatV3
 )
 
 type indexWriterStage uint8
@@ -266,9 +269,9 @@ func NewWriterWithVersion(ctx context.Context, version int, fn string) (*Writer,
 	return iw, nil
 }
 
-// NewWriter returns a new Writer to the given filename.
-func NewWriter(ctx context.Context, indexFormat int, fn string) (*Writer, error) {
-	return NewWriterWithVersion(ctx, indexFormat, fn)
+// NewWriter returns a new Writer to the given filename. It serializes data according to the `LiveFormat` version
+func NewWriter(ctx context.Context, fn string) (*Writer, error) {
+	return NewWriterWithVersion(ctx, LiveFormat, fn)
 }
 
 func (w *Writer) write(bufs ...[]byte) error {

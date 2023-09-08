@@ -31,10 +31,10 @@ type maxHeap struct {
 	Items     []Stat
 }
 
-func (m *maxHeap) init(length int) {
-	m.maxLength = length
+func (m *maxHeap) init(len int) {
+	m.maxLength = len
 	m.minValue = math.MaxUint64
-	m.Items = make([]Stat, 0, length)
+	m.Items = make([]Stat, 0, len)
 }
 
 func (m *maxHeap) push(item Stat) {

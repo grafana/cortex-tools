@@ -75,7 +75,7 @@ Redirect stdlib logger to Go kit logger.
 import (
 	"os"
 	stdlog "log"
-	kitlog "github.com/go-kit/log"
+	kitlog "github.com/go-kit/kit/log"
 )
 
 func main() {
