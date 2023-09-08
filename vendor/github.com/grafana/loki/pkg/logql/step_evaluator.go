@@ -1,6 +1,8 @@
 package logql
 
 import (
+	"errors"
+
 	"github.com/prometheus/prometheus/promql"
 )
 
@@ -12,6 +14,41 @@ type StepEvaluator interface {
 	Close() error
 	// Reports any error
 	Error() error
-	// Explain returns a print of the step evaluation tree
-	Explain(Node)
+}
+
+type stepEvaluator struct {
+	fn    func() (bool, int64, promql.Vector)
+	close func() error
+	err   func() error
+}
+
+func newStepEvaluator(fn func() (bool, int64, promql.Vector), closeFn func() error, err func() error) (StepEvaluator, error) {
+	if fn == nil {
+		return nil, errors.New("nil step evaluator fn")
+	}
+
+	if closeFn == nil {
+		closeFn = func() error { return nil }
+	}
+
+	if err == nil {
+		err = func() error { return nil }
+	}
+	return &stepEvaluator{
+		fn:    fn,
+		close: closeFn,
+		err:   err,
+	}, nil
+}
+
+func (e *stepEvaluator) Next() (bool, int64, promql.Vector) {
+	return e.fn()
+}
+
+func (e *stepEvaluator) Close() error {
+	return e.close()
+}
+
+func (e *stepEvaluator) Error() error {
+	return e.err()
 }

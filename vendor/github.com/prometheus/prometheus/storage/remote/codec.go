@@ -429,6 +429,7 @@ func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	c.histogramsCur += sort.Search(len(c.series.histograms)-c.histogramsCur, func(n int) bool {
 		return c.series.histograms[n+c.histogramsCur].Timestamp >= t
 	})
+
 	switch {
 	case c.floatsCur < len(c.series.floats) && c.histogramsCur < len(c.series.histograms):
 		// If float samples and histogram samples have overlapping timestamps prefer the float samples.
@@ -451,14 +452,15 @@ func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	case c.histogramsCur < len(c.series.histograms):
 		c.curValType = getHistogramValType(&c.series.histograms[c.histogramsCur])
 	}
+
 	return c.curValType
 }
 
 func getHistogramValType(h *prompb.Histogram) chunkenc.ValueType {
-	if h.IsFloatHistogram() {
-		return chunkenc.ValFloatHistogram
+	if _, isInt := h.GetCount().(*prompb.Histogram_CountInt); isInt {
+		return chunkenc.ValHistogram
 	}
-	return chunkenc.ValHistogram
+	return chunkenc.ValFloatHistogram
 }
 
 // At implements chunkenc.Iterator.
@@ -514,6 +516,7 @@ func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 		peekHistTS = c.series.histograms[c.histogramsCur+1].Timestamp
 	}
 	c.curValType = chunkenc.ValNone
+
 	switch {
 	case peekFloatTS < peekHistTS:
 		c.floatsCur++
@@ -533,6 +536,7 @@ func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 		c.histogramsCur++
 		c.curValType = chunkenc.ValFloat
 	}
+
 	return c.curValType
 }
 
@@ -625,11 +629,8 @@ func exemplarProtoToExemplar(ep prompb.Exemplar) exemplar.Exemplar {
 
 // HistogramProtoToHistogram extracts a (normal integer) Histogram from the
 // provided proto message. The caller has to make sure that the proto message
-// represents an integer histogram and not a float histogram, or it panics.
+// represents an integer histogram and not a float histogram.
 func HistogramProtoToHistogram(hp prompb.Histogram) *histogram.Histogram {
-	if hp.IsFloatHistogram() {
-		panic("HistogramProtoToHistogram called with a float histogram")
-	}
 	return &histogram.Histogram{
 		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
 		Schema:           hp.Schema,
@@ -646,12 +647,8 @@ func HistogramProtoToHistogram(hp prompb.Histogram) *histogram.Histogram {
 
 // FloatHistogramProtoToFloatHistogram extracts a float Histogram from the
 // provided proto message to a Float Histogram. The caller has to make sure that
-// the proto message represents a float histogram and not an integer histogram,
-// or it panics.
+// the proto message represents a float histogram and not an integer histogram.
 func FloatHistogramProtoToFloatHistogram(hp prompb.Histogram) *histogram.FloatHistogram {
-	if !hp.IsFloatHistogram() {
-		panic("FloatHistogramProtoToFloatHistogram called with an integer histogram")
-	}
 	return &histogram.FloatHistogram{
 		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
 		Schema:           hp.Schema,
@@ -668,11 +665,8 @@ func FloatHistogramProtoToFloatHistogram(hp prompb.Histogram) *histogram.FloatHi
 
 // HistogramProtoToFloatHistogram extracts and converts a (normal integer) histogram from the provided proto message
 // to a float histogram. The caller has to make sure that the proto message represents an integer histogram and not a
-// float histogram, or it panics.
+// float histogram.
 func HistogramProtoToFloatHistogram(hp prompb.Histogram) *histogram.FloatHistogram {
-	if hp.IsFloatHistogram() {
-		panic("HistogramProtoToFloatHistogram called with a float histogram")
-	}
 	return &histogram.FloatHistogram{
 		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
 		Schema:           hp.Schema,

@@ -151,26 +151,18 @@ func (m *tsdbManager) Start() (err error) {
 	return nil
 }
 
-type chunkInfo struct {
-	chunkMetas index.ChunkMetas
-	tsdbFormat int
-}
-
 func (m *tsdbManager) buildFromHead(heads *tenantHeads, shipper indexshipper.IndexShipper, tableRanges []config.TableRange) (err error) {
 	periods := make(map[string]*Builder)
 
 	if err := heads.forAll(func(user string, ls labels.Labels, fp uint64, chks index.ChunkMetas) error {
 
 		// chunks may overlap index period bounds, in which case they're written to multiple
-		pds := make(map[string]chunkInfo)
+		pds := make(map[string]index.ChunkMetas)
 		for _, chk := range chks {
 			idxBuckets := indexBuckets(chk.From(), chk.Through(), tableRanges)
 
 			for _, bucket := range idxBuckets {
-				chkinfo := pds[bucket.prefix]
-				chkinfo.chunkMetas = append(chkinfo.chunkMetas, chk)
-				chkinfo.tsdbFormat = bucket.tsdbFormat
-				pds[bucket.prefix] = chkinfo
+				pds[bucket] = append(pds[bucket], chk)
 			}
 		}
 
@@ -180,11 +172,10 @@ func (m *tsdbManager) buildFromHead(heads *tenantHeads, shipper indexshipper.Ind
 		withTenant := lb.Labels()
 
 		// Add the chunks to all relevant builders
-		for pd, chkinfo := range pds {
-			matchingChks := chkinfo.chunkMetas
+		for pd, matchingChks := range pds {
 			b, ok := periods[pd]
 			if !ok {
-				b = NewBuilder(chkinfo.tsdbFormat)
+				b = NewBuilder(index.LiveFormat)
 				periods[pd] = b
 			}
 
@@ -299,19 +290,13 @@ func (m *tsdbManager) BuildFromWALs(t time.Time, ids []WALIdentifier, legacy boo
 	return nil
 }
 
-type indexInfo struct {
-	prefix     string
-	tsdbFormat int
-}
-
-func indexBuckets(from, through model.Time, tableRanges config.TableRanges) (res []indexInfo) {
+func indexBuckets(from, through model.Time, tableRanges config.TableRanges) (res []string) {
 	start := from.Time().UnixNano() / int64(config.ObjectStorageIndexRequiredPeriod)
 	end := through.Time().UnixNano() / int64(config.ObjectStorageIndexRequiredPeriod)
 	for cur := start; cur <= end; cur++ {
 		cfg := tableRanges.ConfigForTableNumber(cur)
 		if cfg != nil {
-			tsdbFormat, _ := cfg.TSDBFormat() // Ignoring error, as any valid period config should return valid format.
-			res = append(res, indexInfo{prefix: cfg.IndexTables.Prefix + strconv.Itoa(int(cur)), tsdbFormat: tsdbFormat})
+			res = append(res, cfg.IndexTables.Prefix+strconv.Itoa(int(cur)))
 		}
 	}
 	if len(res) == 0 {

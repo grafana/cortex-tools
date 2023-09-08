@@ -6,9 +6,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-
-	"github.com/grafana/dskit/httpgrpc"
-	"github.com/grafana/dskit/instrument"
+	"github.com/weaveworks/common/httpgrpc"
+	"github.com/weaveworks/common/instrument"
 )
 
 // RegistererWithKVName wraps the provided Registerer with the KV name label. If a nil reg

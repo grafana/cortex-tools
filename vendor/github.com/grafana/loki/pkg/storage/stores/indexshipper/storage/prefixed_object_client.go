@@ -21,10 +21,6 @@ func (p prefixedObjectClient) PutObject(ctx context.Context, objectKey string, o
 	return p.downstreamClient.PutObject(ctx, p.prefix+objectKey, object)
 }
 
-func (p prefixedObjectClient) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
-	return p.downstreamClient.ObjectExists(ctx, p.prefix+objectKey)
-}
-
 func (p prefixedObjectClient) GetObject(ctx context.Context, objectKey string) (io.ReadCloser, int64, error) {
 	return p.downstreamClient.GetObject(ctx, p.prefix+objectKey)
 }
@@ -52,10 +48,6 @@ func (p prefixedObjectClient) DeleteObject(ctx context.Context, objectKey string
 
 func (p prefixedObjectClient) IsObjectNotFoundErr(err error) bool {
 	return p.downstreamClient.IsObjectNotFoundErr(err)
-}
-
-func (p prefixedObjectClient) IsRetryableErr(err error) bool {
-	return p.downstreamClient.IsRetryableErr(err)
 }
 
 func (p prefixedObjectClient) Stop() {

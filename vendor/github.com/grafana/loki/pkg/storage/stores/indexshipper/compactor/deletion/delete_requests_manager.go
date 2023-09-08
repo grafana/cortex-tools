@@ -10,7 +10,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
 
 	"github.com/grafana/loki/pkg/storage/stores/indexshipper/compactor/deletionmode"
 	"github.com/grafana/loki/pkg/storage/stores/indexshipper/compactor/retention"
@@ -269,9 +268,9 @@ func (d *DeleteRequestsManager) Expired(ref retention.ChunkEntry, _ model.Time) 
 	}
 
 	d.metrics.deleteRequestsChunksSelectedTotal.WithLabelValues(string(ref.UserID)).Inc()
-	return true, func(ts time.Time, s string, structuredMetadata ...labels.Label) bool {
+	return true, func(ts time.Time, s string) bool {
 		for _, ff := range filterFuncs {
-			if ff(ts, s, structuredMetadata...) {
+			if ff(ts, s) {
 				return true
 			}
 		}

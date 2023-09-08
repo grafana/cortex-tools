@@ -431,7 +431,7 @@ github.com/coreos/go-semver/semver
 ## explicit; go 1.12
 github.com/coreos/go-systemd/v22/activation
 github.com/coreos/go-systemd/v22/journal
-# github.com/cortexproject/cortex v1.15.2-0.20230901171400-63b372cbd008
+# github.com/cortexproject/cortex v1.15.2-0.20230628221417-9e783e7deab8
 ## explicit; go 1.18
 github.com/cortexproject/cortex/pkg/chunk/encoding
 github.com/cortexproject/cortex/pkg/cortexpb
@@ -447,7 +447,6 @@ github.com/cortexproject/cortex/pkg/storage/bucket/swift
 github.com/cortexproject/cortex/pkg/tenant
 github.com/cortexproject/cortex/pkg/util
 github.com/cortexproject/cortex/pkg/util/backoff
-github.com/cortexproject/cortex/pkg/util/errors
 github.com/cortexproject/cortex/pkg/util/extract
 github.com/cortexproject/cortex/pkg/util/flagext
 github.com/cortexproject/cortex/pkg/util/grpcclient
@@ -754,9 +753,8 @@ github.com/gosimple/slug
 # github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 ## explicit; go 1.13
 github.com/grafana-tools/sdk
-# github.com/grafana/dskit v0.0.0-20230905112532-e4f33b342cb6
-## explicit; go 1.19
-github.com/grafana/dskit/aws
+# github.com/grafana/dskit v0.0.0-20230908075806-579cf66fbf9b
+## explicit; go 1.18
 github.com/grafana/dskit/backoff
 github.com/grafana/dskit/concurrency
 github.com/grafana/dskit/crypto/tls
@@ -767,9 +765,6 @@ github.com/grafana/dskit/flagext
 github.com/grafana/dskit/grpcclient
 github.com/grafana/dskit/grpcencoding/snappy
 github.com/grafana/dskit/grpcutil
-github.com/grafana/dskit/httpgrpc
-github.com/grafana/dskit/httpgrpc/server
-github.com/grafana/dskit/instrument
 github.com/grafana/dskit/internal/math
 github.com/grafana/dskit/internal/slices
 github.com/grafana/dskit/kv
@@ -779,25 +774,19 @@ github.com/grafana/dskit/kv/etcd
 github.com/grafana/dskit/kv/memberlist
 github.com/grafana/dskit/log
 github.com/grafana/dskit/loser
-github.com/grafana/dskit/middleware
-github.com/grafana/dskit/mtime
 github.com/grafana/dskit/multierror
 github.com/grafana/dskit/netutil
 github.com/grafana/dskit/ring
 github.com/grafana/dskit/ring/client
 github.com/grafana/dskit/ring/shard
 github.com/grafana/dskit/runutil
-github.com/grafana/dskit/server
 github.com/grafana/dskit/services
-github.com/grafana/dskit/signals
 github.com/grafana/dskit/spanlogger
 github.com/grafana/dskit/tenant
-github.com/grafana/dskit/tracing
-github.com/grafana/dskit/user
 # github.com/grafana/gomemcache v0.0.0-20230316202710-a081dae0aba9
 ## explicit; go 1.18
 github.com/grafana/gomemcache/memcache
-# github.com/grafana/loki v1.6.2-0.20230905071424-a60c1777ce15
+# github.com/grafana/loki v1.6.2-0.20230803180300-1221658fc5bb
 ## explicit; go 1.20
 github.com/grafana/loki/pkg/analytics
 github.com/grafana/loki/pkg/chunkenc
@@ -852,7 +841,6 @@ github.com/grafana/loki/pkg/storage/chunk/client/aws
 github.com/grafana/loki/pkg/storage/chunk/client/azure
 github.com/grafana/loki/pkg/storage/chunk/client/baidubce
 github.com/grafana/loki/pkg/storage/chunk/client/cassandra
-github.com/grafana/loki/pkg/storage/chunk/client/congestion
 github.com/grafana/loki/pkg/storage/chunk/client/gcp
 github.com/grafana/loki/pkg/storage/chunk/client/grpc
 github.com/grafana/loki/pkg/storage/chunk/client/hedging
@@ -906,7 +894,7 @@ github.com/grafana/loki/pkg/util/spanlogger
 github.com/grafana/loki/pkg/util/validation
 github.com/grafana/loki/pkg/util/wal
 github.com/grafana/loki/pkg/validation
-# github.com/grafana/loki/pkg/push v0.0.0-20230904150506-087b21fa5ec6
+# github.com/grafana/loki/pkg/push v0.0.0-20230717064328-15af77ba8370
 ## explicit; go 1.19
 github.com/grafana/loki/pkg/push
 # github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd
@@ -952,6 +940,8 @@ github.com/hashicorp/go-rootcerts
 # github.com/hashicorp/go-sockaddr v1.0.2
 ## explicit
 github.com/hashicorp/go-sockaddr
+# github.com/hashicorp/go-version v1.6.0
+## explicit
 # github.com/hashicorp/golang-lru v0.6.0
 ## explicit; go 1.12
 github.com/hashicorp/golang-lru/simplelru
@@ -1149,7 +1139,7 @@ github.com/prometheus/exporter-toolkit/web
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
-# github.com/prometheus/prometheus v1.8.2-0.20220411232225-ce6a643ee88f => github.com/prometheus/prometheus v0.45.0
+# github.com/prometheus/prometheus v1.8.2-0.20220411232225-ce6a643ee88f => github.com/prometheus/prometheus v0.43.1-0.20230419161410-69155c6ba1e9
 ## explicit; go 1.19
 github.com/prometheus/prometheus/config
 github.com/prometheus/prometheus/discovery
@@ -1174,7 +1164,6 @@ github.com/prometheus/prometheus/rules
 github.com/prometheus/prometheus/scrape
 github.com/prometheus/prometheus/storage
 github.com/prometheus/prometheus/storage/remote
-github.com/prometheus/prometheus/storage/remote/azuread
 github.com/prometheus/prometheus/template
 github.com/prometheus/prometheus/tsdb
 github.com/prometheus/prometheus/tsdb/chunkenc
@@ -1240,8 +1229,8 @@ github.com/spaolacci/murmur3
 github.com/spf13/afero
 github.com/spf13/afero/internal/common
 github.com/spf13/afero/mem
-# github.com/spf13/cast v1.3.1
-## explicit
+# github.com/spf13/cast v1.5.0
+## explicit; go 1.18
 github.com/spf13/cast
 # github.com/stretchr/objx v0.5.0
 ## explicit; go 1.12
@@ -1251,7 +1240,7 @@ github.com/stretchr/objx
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/mock
 github.com/stretchr/testify/require
-# github.com/thanos-io/objstore v0.0.0-20230816175749-20395bffdf26
+# github.com/thanos-io/objstore v0.0.0-20230816175749-20395bffdf26 => github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204
 ## explicit; go 1.18
 github.com/thanos-io/objstore
 github.com/thanos-io/objstore/exthttp
@@ -1260,7 +1249,7 @@ github.com/thanos-io/objstore/providers/filesystem
 github.com/thanos-io/objstore/providers/gcs
 github.com/thanos-io/objstore/providers/s3
 github.com/thanos-io/objstore/providers/swift
-github.com/thanos-io/objstore/tracing/opentracing
+github.com/thanos-io/objstore/tracing
 # github.com/thanos-io/thanos v0.32.1-0.20230831143954-f75e44ac929c
 ## explicit; go 1.18
 github.com/thanos-io/thanos/pkg/discovery/dns
@@ -1294,6 +1283,7 @@ github.com/uber/jaeger-lib/metrics
 github.com/uber/jaeger-lib/metrics/prometheus
 # github.com/weaveworks/common v0.0.0-20230713110358-22cda1cdbe0a
 ## explicit; go 1.14
+github.com/weaveworks/common/aws
 github.com/weaveworks/common/errors
 github.com/weaveworks/common/grpc
 github.com/weaveworks/common/httpgrpc
@@ -1301,6 +1291,7 @@ github.com/weaveworks/common/httpgrpc/server
 github.com/weaveworks/common/instrument
 github.com/weaveworks/common/logging
 github.com/weaveworks/common/middleware
+github.com/weaveworks/common/mtime
 github.com/weaveworks/common/server
 github.com/weaveworks/common/signals
 github.com/weaveworks/common/tracing
@@ -1477,7 +1468,6 @@ golang.org/x/oauth2/jwt
 ## explicit; go 1.17
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-golang.org/x/sync/singleflight
 # golang.org/x/sys v0.11.0
 ## explicit; go 1.17
 golang.org/x/sys/cpu
@@ -1744,28 +1734,13 @@ gotest.tools/assert/cmp
 gotest.tools/internal/difflib
 gotest.tools/internal/format
 gotest.tools/internal/source
-# k8s.io/apimachinery v0.27.3
-## explicit; go 1.20
-k8s.io/apimachinery/pkg/util/net
-k8s.io/apimachinery/pkg/util/sets
-# k8s.io/klog/v2 v2.100.1
-## explicit; go 1.13
-k8s.io/klog/v2
-k8s.io/klog/v2/internal/buffer
-k8s.io/klog/v2/internal/clock
-k8s.io/klog/v2/internal/dbg
-k8s.io/klog/v2/internal/serialize
-k8s.io/klog/v2/internal/severity
-# k8s.io/utils v0.0.0-20230711102312-30195339c3c7
-## explicit; go 1.18
-k8s.io/utils/internal/third_party/forked/golang/net
-k8s.io/utils/net
 # rsc.io/binaryregexp v0.2.0
 ## explicit; go 1.12
 rsc.io/binaryregexp
 rsc.io/binaryregexp/syntax
 # github.com/gocql/gocql => github.com/grafana/gocql v0.0.0-20200605141915-ba5dc39ece85
 # github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
-# github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.45.0
+# github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.43.1-0.20230419161410-69155c6ba1e9
 # google.golang.org/grpc => google.golang.org/grpc v1.53.0
 # github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
+# github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204

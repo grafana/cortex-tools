@@ -593,14 +593,13 @@ func (b *Builder) Set(n, v string) *Builder {
 }
 
 func (b *Builder) Get(n string) string {
-	// Del() removes entries from .add but Set() does not remove from .del, so check .add first.
+	if slices.Contains(b.del, n) {
+		return ""
+	}
 	for _, a := range b.add {
 		if a.Name == n {
 			return a.Value
 		}
-	}
-	if slices.Contains(b.del, n) {
-		return ""
 	}
 	return b.base.Get(n)
 }
@@ -800,7 +799,7 @@ func (b *ScratchBuilder) Sort() {
 	slices.SortFunc(b.add, func(a, b Label) bool { return a.Name < b.Name })
 }
 
-// Assign is for when you already have a Labels which you want this ScratchBuilder to return.
+// Asssign is for when you already have a Labels which you want this ScratchBuilder to return.
 func (b *ScratchBuilder) Assign(l Labels) {
 	b.output = l
 }

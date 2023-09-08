@@ -19,8 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 
 	"github.com/gocql/gocql/internal/lru"
 	"github.com/gocql/gocql/internal/streams"
@@ -47,8 +47,8 @@ func approve(authenticator string) bool {
 	return false
 }
 
-// JoinHostPort is a utility to return a address string that can be used
-// gocql.Conn to form a connection with a host.
+//JoinHostPort is a utility to return a address string that can be used
+//gocql.Conn to form a connection with a host.
 func JoinHostPort(addr string, port int) string {
 	addr = strings.TrimSpace(addr)
 	if _, _, err := net.SplitHostPort(addr); err != nil {

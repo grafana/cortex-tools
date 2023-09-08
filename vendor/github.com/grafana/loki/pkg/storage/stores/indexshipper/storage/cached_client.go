@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log/level"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/grafana/loki/pkg/storage/chunk/client"
 	util_log "github.com/grafana/loki/pkg/util/log"
@@ -18,7 +17,6 @@ import (
 
 const (
 	cacheTimeout = 1 * time.Minute
-	refreshKey   = "refresh"
 )
 
 type table struct {
@@ -28,16 +26,19 @@ type table struct {
 	userIDs       []client.StorageCommonPrefix
 	userObjects   map[string][]client.StorageObject
 
-	cacheBuiltAt    time.Time
-	buildCacheGroup singleflight.Group
+	cacheBuiltAt   time.Time
+	buildCacheChan chan struct{}
+	buildCacheWg   sync.WaitGroup
+	err            error
 }
 
 func newTable(tableName string) *table {
 	return &table{
-		name:          tableName,
-		userIDs:       []client.StorageCommonPrefix{},
-		userObjects:   map[string][]client.StorageObject{},
-		commonObjects: []client.StorageObject{},
+		name:           tableName,
+		buildCacheChan: make(chan struct{}, 1),
+		userIDs:        []client.StorageCommonPrefix{},
+		userObjects:    map[string][]client.StorageObject{},
+		commonObjects:  []client.StorageObject{},
 	}
 }
 
@@ -49,20 +50,43 @@ type cachedObjectClient struct {
 	tablesMtx              sync.RWMutex
 	tableNamesCacheBuiltAt time.Time
 
-	buildCacheGroup singleflight.Group
+	buildTableNamesCacheChan chan struct{}
+	buildTableNamesCacheWg   sync.WaitGroup
+	err                      error
 }
 
 func newCachedObjectClient(downstreamClient client.ObjectClient) *cachedObjectClient {
 	return &cachedObjectClient{
-		ObjectClient: downstreamClient,
-		tables:       map[string]*table{},
+		ObjectClient:             downstreamClient,
+		tables:                   map[string]*table{},
+		buildTableNamesCacheChan: make(chan struct{}, 1),
+	}
+}
+
+// buildCacheOnce makes sure we build the cache just once when it is called concurrently.
+// We have a buffered channel here with a capacity of 1 to make sure only one concurrent call makes it through.
+// We also have a sync.WaitGroup to make sure all the concurrent calls to buildCacheOnce wait until the cache gets rebuilt since
+// we are doing read-through cache, and we do not want to serve stale results.
+func buildCacheOnce(buildCacheWg *sync.WaitGroup, buildCacheChan chan struct{}, buildCacheFunc func()) {
+	buildCacheWg.Add(1)
+	defer buildCacheWg.Done()
+
+	// when the cache is expired, only one concurrent call must be able to rebuild it
+	// all other calls will wait until the cache is built successfully or failed with an error
+	select {
+	case buildCacheChan <- struct{}{}:
+		buildCacheFunc()
+		<-buildCacheChan
+	default:
 	}
 }
 
 func (c *cachedObjectClient) RefreshIndexTableNamesCache(ctx context.Context) {
-	_, _, _ = c.buildCacheGroup.Do(refreshKey, func() (interface{}, error) {
-		return nil, c.buildTableNamesCache(ctx)
+	buildCacheOnce(&c.buildTableNamesCacheWg, c.buildTableNamesCacheChan, func() {
+		c.err = nil
+		c.err = c.buildTableNamesCache(ctx, true)
 	})
+	c.buildTableNamesCacheWg.Wait()
 }
 
 func (c *cachedObjectClient) RefreshIndexTableCache(ctx context.Context, tableName string) {
@@ -79,10 +103,11 @@ func (c *cachedObjectClient) RefreshIndexTableCache(ctx context.Context, tableNa
 		}
 	}
 
-	_, _, _ = tbl.buildCacheGroup.Do(refreshKey, func() (interface{}, error) {
-		err := tbl.buildCache(ctx, c.ObjectClient)
-		return nil, err
+	buildCacheOnce(&tbl.buildCacheWg, tbl.buildCacheChan, func() {
+		tbl.err = nil
+		tbl.err = tbl.buildCache(ctx, c.ObjectClient, true)
 	})
+	tbl.buildCacheWg.Wait()
 }
 
 func (c *cachedObjectClient) List(ctx context.Context, prefix, objectDelimiter string, bypassCache bool) ([]client.StorageObject, []client.StorageCommonPrefix, error) {
@@ -90,12 +115,8 @@ func (c *cachedObjectClient) List(ctx context.Context, prefix, objectDelimiter s
 		return c.ObjectClient.List(ctx, prefix, objectDelimiter)
 	}
 
-	c.tablesMtx.RLock()
-	neverBuiltCache := c.tableNamesCacheBuiltAt.IsZero()
-	c.tablesMtx.RUnlock()
-
 	// if we have never built table names cache, let us build it first.
-	if neverBuiltCache {
+	if c.tableNamesCacheBuiltAt.IsZero() {
 		c.RefreshIndexTableNamesCache(ctx)
 	}
 
@@ -126,9 +147,18 @@ func (c *cachedObjectClient) List(ctx context.Context, prefix, objectDelimiter s
 }
 
 func (c *cachedObjectClient) listTableNames(ctx context.Context) ([]client.StorageCommonPrefix, error) {
-	err := c.updateTableNamesCache(ctx)
-	if err != nil {
-		return nil, err
+	if time.Since(c.tableNamesCacheBuiltAt) >= cacheTimeout {
+		buildCacheOnce(&c.buildTableNamesCacheWg, c.buildTableNamesCacheChan, func() {
+			c.err = nil
+			c.err = c.buildTableNamesCache(ctx, false)
+		})
+	}
+
+	// wait for cache build operation to finish, if running
+	c.buildTableNamesCacheWg.Wait()
+
+	if c.err != nil {
+		return nil, c.err
 	}
 
 	c.tablesMtx.RLock()
@@ -143,9 +173,18 @@ func (c *cachedObjectClient) listTable(ctx context.Context, tableName string) ([
 		return []client.StorageObject{}, []client.StorageCommonPrefix{}, nil
 	}
 
-	err := tbl.updateCache(ctx, c.ObjectClient)
-	if err != nil {
-		return nil, nil, err
+	if time.Since(tbl.cacheBuiltAt) >= cacheTimeout {
+		buildCacheOnce(&tbl.buildCacheWg, tbl.buildCacheChan, func() {
+			tbl.err = nil
+			tbl.err = tbl.buildCache(ctx, c.ObjectClient, false)
+		})
+	}
+
+	// wait for cache build operation to finish, if running
+	tbl.buildCacheWg.Wait()
+
+	if tbl.err != nil {
+		return nil, nil, tbl.err
 	}
 
 	tbl.mtx.RLock()
@@ -160,9 +199,18 @@ func (c *cachedObjectClient) listUserIndexInTable(ctx context.Context, tableName
 		return []client.StorageObject{}, nil
 	}
 
-	err := tbl.updateCache(ctx, c.ObjectClient)
-	if err != nil {
-		return nil, err
+	if time.Since(tbl.cacheBuiltAt) >= cacheTimeout {
+		buildCacheOnce(&tbl.buildCacheWg, tbl.buildCacheChan, func() {
+			tbl.err = nil
+			tbl.err = tbl.buildCache(ctx, c.ObjectClient, false)
+		})
+	}
+
+	// wait for cache build operation to finish, if running
+	tbl.buildCacheWg.Wait()
+
+	if tbl.err != nil {
+		return nil, tbl.err
 	}
 
 	tbl.mtx.RLock()
@@ -175,21 +223,11 @@ func (c *cachedObjectClient) listUserIndexInTable(ctx context.Context, tableName
 	return []client.StorageObject{}, nil
 }
 
-// Check if the cache is out of date, and build it if so, ensuring only one cache-build is running at a time.
-func (c *cachedObjectClient) updateTableNamesCache(ctx context.Context) error {
-	c.tablesMtx.RLock()
-	outOfDate := time.Since(c.tableNamesCacheBuiltAt) >= cacheTimeout
-	c.tablesMtx.RUnlock()
-	if !outOfDate {
+func (c *cachedObjectClient) buildTableNamesCache(ctx context.Context, forceRefresh bool) (err error) {
+	if !forceRefresh && time.Since(c.tableNamesCacheBuiltAt) < cacheTimeout {
 		return nil
 	}
-	_, err, _ := c.buildCacheGroup.Do(refreshKey, func() (interface{}, error) {
-		return nil, c.buildTableNamesCache(ctx)
-	})
-	return err
-}
 
-func (c *cachedObjectClient) buildTableNamesCache(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			level.Error(util_log.Logger).Log("msg", "failed to build table names cache", "err", err)
@@ -244,22 +282,11 @@ func (c *cachedObjectClient) getTable(tableName string) *table {
 	return c.tables[tableName]
 }
 
-// Check if the cache is out of date, and build it if so, ensuring only one cache-build is running at a time.
-func (t *table) updateCache(ctx context.Context, objectClient client.ObjectClient) error {
-	t.mtx.RLock()
-	outOfDate := time.Since(t.cacheBuiltAt) >= cacheTimeout
-	t.mtx.RUnlock()
-	if !outOfDate {
+func (t *table) buildCache(ctx context.Context, objectClient client.ObjectClient, forceRefresh bool) (err error) {
+	if !forceRefresh && time.Since(t.cacheBuiltAt) < cacheTimeout {
 		return nil
 	}
-	_, err, _ := t.buildCacheGroup.Do(refreshKey, func() (interface{}, error) {
-		err := t.buildCache(ctx, objectClient)
-		return nil, err
-	})
-	return err
-}
 
-func (t *table) buildCache(ctx context.Context, objectClient client.ObjectClient) (err error) {
 	defer func() {
 		if err != nil {
 			level.Error(util_log.Logger).Log("msg", "failed to build table cache", "table_name", t.name, "err", err)

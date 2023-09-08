@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/grafana/dskit/user"
+	"github.com/weaveworks/common/user"
 )
 
 var defaultResolver Resolver = NewSingleResolver()

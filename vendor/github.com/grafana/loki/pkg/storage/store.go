@@ -23,7 +23,6 @@ import (
 	"github.com/grafana/loki/pkg/storage/chunk"
 	"github.com/grafana/loki/pkg/storage/chunk/cache"
 	"github.com/grafana/loki/pkg/storage/chunk/client"
-	"github.com/grafana/loki/pkg/storage/chunk/client/congestion"
 	"github.com/grafana/loki/pkg/storage/chunk/fetcher"
 	"github.com/grafana/loki/pkg/storage/config"
 	"github.com/grafana/loki/pkg/storage/stores"
@@ -74,8 +73,7 @@ type store struct {
 	limits StoreLimits
 	logger log.Logger
 
-	chunkFilterer               chunk.RequestChunkFilterer
-	congestionControllerFactory func(cfg congestion.Config, logger log.Logger, metrics *congestion.Metrics) congestion.Controller
+	chunkFilterer chunk.RequestChunkFilterer
 }
 
 // NewStore creates a new Loki Store using configuration supplied.
@@ -141,8 +139,6 @@ func NewStore(cfg Config, storeCfg config.ChunkStoreConfig, schemaCfg config.Sch
 		storeCfg:  storeCfg,
 		schemaCfg: schemaCfg,
 
-		congestionControllerFactory: congestion.NewController,
-
 		chunkClientMetrics: client.NewChunkClientMetrics(registerer),
 		clientMetrics:      clientMetrics,
 		chunkMetrics:       NewChunkMetrics(registerer, cfg.MaxChunkBatchSize),
@@ -201,18 +197,7 @@ func (s *store) chunkClientForPeriod(p config.PeriodConfig) (client.Client, erro
 	chunkClientReg := prometheus.WrapRegistererWith(
 		prometheus.Labels{"component": "chunk-store-" + p.From.String()}, s.registerer)
 
-	var cc congestion.Controller
-	ccCfg := s.cfg.CongestionControl
-
-	if ccCfg.Enabled {
-		cc = s.congestionControllerFactory(
-			ccCfg,
-			s.logger,
-			congestion.NewMetrics(fmt.Sprintf("%s-%s", objectStoreType, p.From.String()), ccCfg),
-		)
-	}
-
-	chunks, err := NewChunkClient(objectStoreType, s.cfg, s.schemaCfg, cc, chunkClientReg, s.clientMetrics)
+	chunks, err := NewChunkClient(objectStoreType, s.cfg, s.schemaCfg, s.clientMetrics, chunkClientReg)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating object client")
 	}
@@ -394,10 +379,7 @@ func (s *store) lazyChunks(ctx context.Context, matchers []*labels.Matcher, from
 
 	stats := stats.FromContext(ctx)
 
-	start := time.Now()
 	chks, fetchers, err := s.GetChunkRefs(ctx, userID, from, through, matchers...)
-	stats.AddChunkRefsFetchTime(time.Since(start))
-
 	if err != nil {
 		return nil, err
 	}
