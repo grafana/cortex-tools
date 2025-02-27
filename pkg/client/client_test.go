@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -93,4 +95,99 @@ func TestBuildURL(t *testing.T) {
 		})
 	}
 
+}
+
+func TestDoRequest(t *testing.T) {
+	requestCh := make(chan *http.Request, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCh <- r
+		fmt.Fprintln(w, "hello")
+	}))
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name         string
+		user         string
+		key          string
+		id           string
+		authToken    string
+		extraHeaders map[string]string
+		expectedErr  string
+		validate     func(t *testing.T, req *http.Request)
+	}{
+		{
+			name: "basic headers only, no extra headers",
+			id:   "my-tenant-id",
+			validate: func(t *testing.T, req *http.Request) {
+				require.Equal(t, "my-tenant-id", req.Header.Get("X-Scope-OrgID"))
+				// Verify no extra headers were added
+				require.Empty(t, req.Header.Get("key1"))
+			},
+		},
+		{
+			name: "extraHeaders are added",
+			id:   "my-tenant-id",
+			extraHeaders: map[string]string{
+				"key1":          "value1",
+				"key2":          "value2",
+				"X-Scope-OrgID": "first-tenant-id",
+			},
+			validate: func(t *testing.T, req *http.Request) {
+				require.Equal(t, "value1", req.Header.Get("key1"))
+				require.Equal(t, "value2", req.Header.Get("key2"))
+				require.Equal(t, []string{"first-tenant-id", "my-tenant-id"}, req.Header.Values("X-Scope-OrgID"))
+			},
+		},
+		{
+			name:      "auth token with extra headers",
+			id:        "my-tenant-id",
+			authToken: "my-auth-token",
+			extraHeaders: map[string]string{
+				"Custom-Header": "custom-value",
+			},
+			validate: func(t *testing.T, req *http.Request) {
+				require.Equal(t, "Bearer my-auth-token", req.Header.Get("Authorization"))
+				require.Equal(t, "my-tenant-id", req.Header.Get("X-Scope-OrgID"))
+				require.Equal(t, "custom-value", req.Header.Get("Custom-Header"))
+			},
+		},
+		{
+			name:      "authorization header in extra headers is ignored when auth token is set",
+			id:        "my-tenant-id",
+			authToken: "my-auth-token",
+			extraHeaders: map[string]string{
+				"Authorization": "Bearer should-be-ignored",
+			},
+			validate: func(t *testing.T, req *http.Request) {
+				// The Authorization header from extraHeaders should be overwritten
+				require.Equal(t, "Bearer my-auth-token", req.Header.Get("Authorization"))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			client, err := New(Config{
+				Address:      ts.URL,
+				User:         tc.user,
+				Key:          tc.key,
+				AuthToken:    tc.authToken,
+				ID:           tc.id,
+				ExtraHeaders: tc.extraHeaders,
+			})
+			require.NoError(t, err)
+
+			res, err := client.doRequest(ctx, "/test", http.MethodGet, nil)
+
+			if tc.expectedErr != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedErr)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, res.StatusCode)
+				req := <-requestCh
+				tc.validate(t, req)
+			}
+		})
+	}
 }

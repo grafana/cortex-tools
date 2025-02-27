@@ -33,19 +33,21 @@ type Config struct {
 	Address         string `yaml:"address"`
 	ID              string `yaml:"id"`
 	TLS             tls.ClientConfig
-	UseLegacyRoutes bool   `yaml:"use_legacy_routes"`
-	AuthToken       string `yaml:"auth_token"`
+	UseLegacyRoutes bool              `yaml:"use_legacy_routes"`
+	AuthToken       string            `yaml:"auth_token"`
+	ExtraHeaders    map[string]string `yaml:"extra_headers"`
 }
 
 // CortexClient is used to get and load rules into a cortex ruler
 type CortexClient struct {
-	user      string
-	key       string
-	id        string
-	endpoint  *url.URL
-	Client    http.Client
-	apiPath   string
-	authToken string
+	user         string
+	key          string
+	id           string
+	endpoint     *url.URL
+	Client       http.Client
+	apiPath      string
+	authToken    string
+	extraHeaders map[string]string
 }
 
 // New returns a new Client
@@ -87,13 +89,14 @@ func New(cfg Config) (*CortexClient, error) {
 	}
 
 	return &CortexClient{
-		user:      cfg.User,
-		key:       cfg.Key,
-		id:        cfg.ID,
-		endpoint:  endpoint,
-		Client:    client,
-		apiPath:   path,
-		authToken: cfg.AuthToken,
+		user:         cfg.User,
+		key:          cfg.Key,
+		id:           cfg.ID,
+		endpoint:     endpoint,
+		Client:       client,
+		apiPath:      path,
+		authToken:    cfg.AuthToken,
+		extraHeaders: cfg.ExtraHeaders,
 	}, nil
 }
 
@@ -135,6 +138,10 @@ func (r *CortexClient) doRequest(ctx context.Context, path, method string, paylo
 
 	if r.authToken != "" {
 		req.Header.Add("Authorization", "Bearer "+r.authToken)
+	}
+
+	for k, v := range r.extraHeaders {
+		req.Header.Add(k, v)
 	}
 
 	req.Header.Add("X-Scope-OrgID", r.id)

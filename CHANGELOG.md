@@ -4,6 +4,8 @@ Order should be `CHANGE`, `FEATURE`, `ENHANCEMENT`, and `BUGFIX`
 
 ## unreleased/master
 
+* [FEATURE] Add `--extra-headers` support for `cortextool rules` commands. #288
+
 ## v0.11.0
 
 * [FEATURE] Support Arm64 on Darwin for all binaries (benchtool etc). #215
