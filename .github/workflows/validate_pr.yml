@@ -1,21 +1,28 @@
 name: Validate PR
+
 on:
   pull_request:
     paths-ignore:
     - 'docs/**'
     - '*.md'
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v4
         with:
           go-version: '1.21'
           cache: false
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3.7.0
+        uses: golangci/golangci-lint-action@3a919529898de77ec3da873e3063ca4b10e7f5cc # v3.7.0
         with:
           version: v1.54.2
   unit_tests:
@@ -23,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Set up Go 1.21
         uses: actions/setup-go@v4
         with:
@@ -34,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
       - name: Set up Go 1.21
         uses: actions/setup-go@v4
         with:
