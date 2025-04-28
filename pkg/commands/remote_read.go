@@ -404,7 +404,7 @@ func (c *RemoteReadCommand) export(k *kingpin.ParseContext) error {
 		return err
 	}
 
-	iterator := func() backfill.Iterator {
+	iteratorCreator := func() backfill.Iterator {
 		return newTimeSeriesIterator(timeseries)
 	}
 
@@ -421,7 +421,7 @@ func (c *RemoteReadCommand) export(k *kingpin.ParseContext) error {
 	defer pipeR.Close()
 
 	log.Infof("Store TSDB blocks in '%s'", c.tsdbPath)
-	if err := backfill.CreateBlocks(iterator, int64(mint), int64(maxt), 1000, c.tsdbPath, true, pipeW); err != nil {
+	if err := backfill.CreateBlocks(iteratorCreator, int64(mint), int64(maxt), 1000, c.tsdbPath, true, pipeW); err != nil {
 		return err
 	}
 

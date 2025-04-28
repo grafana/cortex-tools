@@ -5,6 +5,7 @@ Order should be `CHANGE`, `FEATURE`, `ENHANCEMENT`, and `BUGFIX`
 ## unreleased/master
 
 * [FEATURE] Add `--extra-headers` support for `cortextool rules` commands. #288
+* [BUGFIX] Fix out of bounds error on export with large timespans and/or series count.
 
 ## v0.11.0
 
