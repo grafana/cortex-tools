@@ -1,15 +1,15 @@
-# Be aware of new `mimirtool`
+# Note that Grafana Mimirtool exists
 
-If you're using this tool with Grafana Mimir, please use the new `mimirtool` instead:
+If you're using this tool with Grafana Mimir, use Grafana Mimirtool (`mimirtool`) instead:
 
-- [`mimirtool` documentation](https://grafana.com/docs/mimir/latest/operators-guide/tools/mimirtool/)
-- [`mimirtool` releases](https://github.com/grafana/mimir/releases)
+- [Grafana Mimirtool](https://grafana.com/docs/mimir/latest/operators-guide/tools/mimirtool/) documentation
+- [Grafana Mimirtool](thttps://github.com/grafana/mimir/releases) (`mimirtool`) releases
 
 ---
 
-# Cortex Tools
+# Cortex tools
 
-This repo contains tools used for interacting with [Cortex](https://github.com/cortexproject/cortex).
+This repository contains tools that are used for interacting with [Cortex](https://github.com/cortexproject/cortex).
 
 * [benchtool](docs/benchtool.md): A powerful YAML driven tool for benchmarking
   Cortex write and query API.
@@ -30,7 +30,7 @@ The various binaries are available for macOS, Windows, and Linux.
 $ brew install grafana/grafana/cortextool
 ```
 
-## Linux, Docker and Windows
+## Linux, Docker, and Windows
 
 Refer to the [latest release](https://github.com/grafana/cortex-tools/releases) for installation intructions on these.
 
