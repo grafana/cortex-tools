@@ -20,16 +20,17 @@ type MetricsInGrafana struct {
 }
 
 type DashboardMetrics struct {
-	Slug        string   `json:"slug"`
-	UID         string   `json:"uid,omitempty"`
-	Title       string   `json:"title"`
-	Metrics     []string `json:"metrics"`
-	ParseErrors []string `json:"parse_errors"`
+	Slug           string              `json:"slug"`
+	UID            string              `json:"uid,omitempty"`
+	Title          string              `json:"title"`
+	Metrics        []string            `json:"metrics"`
+	LabelsByMetric map[string][]string `json:"labels_by_metric"`
+	ParseErrors    []string            `json:"parse_errors"`
 }
 
 func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 	var parseErrors []error
-	metrics := make(map[string]struct{})
+	metrics := make(map[string][]string)
 
 	// Iterate through all the panels and collect metrics
 	for _, panel := range board.Panels {
@@ -68,17 +69,18 @@ func ParseMetricsInBoard(mig *MetricsInGrafana, board sdk.Board) {
 	sort.Strings(metricsInBoard)
 
 	mig.Dashboards = append(mig.Dashboards, DashboardMetrics{
-		Slug:        board.Slug,
-		UID:         board.UID,
-		Title:       board.Title,
-		Metrics:     metricsInBoard,
-		ParseErrors: parseErrs,
+		Slug:           board.Slug,
+		UID:            board.UID,
+		Title:          board.Title,
+		Metrics:        metricsInBoard,
+		ParseErrors:    parseErrs,
+		LabelsByMetric: metrics,
 	})
 
 }
 
-func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{}) []error {
-	parseErrors := []error{}
+func metricsFromTemplating(templating sdk.Templating, metrics map[string][]string) []error {
+	var parseErrors []error
 	for _, templateVar := range templating.List {
 		if templateVar.Type != "query" {
 			continue
@@ -114,7 +116,7 @@ func metricsFromTemplating(templating sdk.Templating, metrics map[string]struct{
 	return parseErrors
 }
 
-func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
+func metricsFromPanel(panel sdk.Panel, metrics map[string][]string) []error {
 	var parseErrors []error
 
 	targets := panel.GetTargets()
@@ -140,7 +142,7 @@ func metricsFromPanel(panel sdk.Panel, metrics map[string]struct{}) []error {
 	return parseErrors
 }
 
-func parseQuery(query string, metrics map[string]struct{}) error {
+func parseQuery(query string, metrics map[string][]string) error {
 	query = strings.ReplaceAll(query, `$__interval`, "5m")
 	query = strings.ReplaceAll(query, `$interval`, "5m")
 	query = strings.ReplaceAll(query, `$resolution`, "5s")
@@ -154,8 +156,21 @@ func parseQuery(query string, metrics map[string]struct{}) error {
 	}
 
 	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
+		var labels []string
+
 		if n, ok := node.(*parser.VectorSelector); ok {
-			metrics[n.Name] = struct{}{}
+			for _, l := range n.LabelMatchers {
+				// ignore meta label __name__
+				if l.Name == "__name__" {
+					continue
+				}
+				labels = append(
+					labels,
+					l.Name,
+				)
+			}
+			metrics[n.Name] = labels
+
 		}
 
 		return nil
