@@ -255,7 +255,7 @@ require (
 	google.golang.org/genproto v0.0.0-20230717213848-3f92550aa753 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230717213848-3f92550aa753 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230717213848-3f92550aa753 // indirect
-	google.golang.org/grpc v1.56.2 // indirect
+	google.golang.org/grpc v1.56.3 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
@@ -269,7 +269,7 @@ replace github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0
 
 replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.43.1-0.20230419161410-69155c6ba1e9
 
-replace google.golang.org/grpc => google.golang.org/grpc v1.53.0
+replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
 
 // Loki depends on this version
 replace github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
