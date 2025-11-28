@@ -48,6 +48,9 @@ func (cmd *AnalyseCommand) Register(app *kingpin.Application) {
 		Envar("GRAFANA_API_KEY").
 		Default("").
 		StringVar(&gaCmd.apiKey)
+	grafanaAnalyseCmd.Flag("tags", "Tags used for filtering dashboards for alanyse, seperate multiple tags with comma").
+		Default("").
+		StringVar(&gaCmd.tags)
 	grafanaAnalyseCmd.Flag("read-timeout", "timeout for read requests").
 		Default("300s").
 		DurationVar(&gaCmd.readTimeout)
