@@ -759,7 +759,7 @@ github.com/gorilla/mux
 # github.com/gosimple/slug v1.1.1
 ## explicit
 github.com/gosimple/slug
-# github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
+# github.com/grafana-tools/sdk v0.0.0-20220919052116-6562121319fc => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 ## explicit; go 1.13
 github.com/grafana-tools/sdk
 # github.com/grafana/dskit v0.0.0-20230908075806-579cf66fbf9b
