@@ -272,6 +272,6 @@ replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.
 replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
 
 // Loki depends on this version
-replace github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
+replace github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0
 
 replace github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204

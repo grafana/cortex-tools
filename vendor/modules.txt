@@ -1207,7 +1207,7 @@ github.com/rs/xid
 # github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529
 ## explicit
 github.com/sean-/seed
-# github.com/sercand/kuberesolver/v4 v4.0.0 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
+# github.com/sercand/kuberesolver/v4 v4.0.0 => github.com/sercand/kuberesolver/v4 v4.0.0
 ## explicit; go 1.14
 github.com/sercand/kuberesolver/v4
 # github.com/shopspring/decimal v1.2.0
@@ -1760,5 +1760,5 @@ rsc.io/binaryregexp/syntax
 # github.com/grafana-tools/sdk => github.com/colega/grafana-tools-sdk v0.0.0-20220323154849-711bca56d13f
 # github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.43.1-0.20230419161410-69155c6ba1e9
 # google.golang.org/grpc => google.golang.org/grpc v1.56.3
-# github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
+# github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0
 # github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204
