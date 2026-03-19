@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/alecthomas/chroma v0.7.0
-	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
+	github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b
 	github.com/cortexproject/cortex v1.15.2-0.20230628221417-9e783e7deab8
 	github.com/go-kit/log v0.2.1
 	github.com/gogo/protobuf v1.3.2
