@@ -11,7 +11,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/gonum/stat v0.0.0-20181125101827-41a0da705a5b
 	github.com/google/go-github/v32 v32.1.0
-	github.com/gorilla/mux v1.8.0
+	github.com/gorilla/mux v1.8.1
 	github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
 	github.com/grafana/dskit v0.0.0-20230908075806-579cf66fbf9b
 	github.com/grafana/loki v1.6.2-0.20230803180300-1221658fc5bb
