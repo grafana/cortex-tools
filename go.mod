@@ -26,7 +26,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/thanos-io/objstore v0.0.0-20230816175749-20395bffdf26
 	github.com/thanos-io/thanos v0.32.1-0.20230831143954-f75e44ac929c
-	github.com/weaveworks/common v0.0.0-20230713110358-22cda1cdbe0a
+	github.com/weaveworks/common v0.0.0-20230728070032-dd9e68f319d5
 	golang.org/x/sync v0.7.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.4.0
