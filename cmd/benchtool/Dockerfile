@@ -5,7 +5,7 @@ WORKDIR /build_dir
 ENV GOPROXY=https://proxy.golang.org
 RUN make clean && make benchtool
 
-FROM       alpine:3.14
+FROM       alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
 RUN        apk add --update --no-cache ca-certificates
 COPY       --from=build /build_dir/cmd/benchtool/benchtool /usr/bin/benchtool
 EXPOSE     80
