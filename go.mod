@@ -14,7 +14,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/grafana-tools/sdk v0.0.0-20220203092117-edae16afa87b
 	github.com/grafana/dskit v0.0.0-20230908075806-579cf66fbf9b
-	github.com/grafana/loki v1.6.2-0.20230803180300-1221658fc5bb
+	github.com/grafana/loki/v2 v2.3.0
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/opentracing-contrib/go-stdlib v1.0.0
 	github.com/pkg/errors v0.9.1
