@@ -1,6 +1,6 @@
 module github.com/grafana/cortex-tools
 
-go 1.21
+go 1.23.0
 
 require (
 	github.com/alecthomas/chroma v0.7.0
@@ -37,8 +37,7 @@ require (
 require (
 	cloud.google.com/go v0.110.4 // indirect
 	cloud.google.com/go/bigtable v1.18.1 // indirect
-	cloud.google.com/go/compute v1.22.0 // indirect
-	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	cloud.google.com/go/iam v1.1.1 // indirect
 	cloud.google.com/go/longrunning v0.5.1 // indirect
 	cloud.google.com/go/storage v1.30.1 // indirect
@@ -244,7 +243,7 @@ require (
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/oauth2 v0.11.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
