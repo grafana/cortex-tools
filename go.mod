@@ -24,7 +24,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20220411232225-ce6a643ee88f
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
-	github.com/thanos-io/objstore v0.0.0-20230816175749-20395bffdf26
+	github.com/thanos-io/objstore v0.0.0-20250813080715-4e5fd4289b50
 	github.com/thanos-io/thanos v0.32.1-0.20230831143954-f75e44ac929c
 	github.com/weaveworks/common v0.0.0-20230713110358-22cda1cdbe0a
 	golang.org/x/sync v0.7.0
@@ -274,4 +274,4 @@ replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
 // Loki depends on this version
 replace github.com/sercand/kuberesolver/v4 => github.com/sercand/kuberesolver/v4 v4.0.0-20230228224450-d8a3bdc2c3f7
 
-replace github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204
+replace github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20250813080715-4e5fd4289b50
