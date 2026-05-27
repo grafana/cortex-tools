@@ -1,4 +1,4 @@
-FROM golang:1.22 as build
+FROM golang:1.26@sha256:2d6c80227255c3112a4d08e67ba98e58efd3846daf15d9d7d4c389565d881b1a as build
 ARG GOARCH="amd64"
 COPY . /build_dir
 WORKDIR /build_dir
